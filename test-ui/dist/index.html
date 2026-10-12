@@ -70,7 +70,7 @@
         <div class="section-title"><div><p class="eyebrow">PARAMETERS</p><h2>تنظیمات اجرا</h2></div><button class="icon-btn" id="resetSettings" title="بازنشانی">↺</button></div>
         <label class="field"><span>System prompt</span><textarea id="systemPrompt" rows="2" placeholder="اختیاری"></textarea></label>
         <div class="control"><label for="temperature">Temperature</label><output id="temperatureValue">0.0</output><input id="temperature" type="range" min="0" max="2" step="0.1" value="0"></div>
-        <div class="control"><label for="maxTokens">حداکثر خروجی</label><output id="maxTokensValue">512</output><input id="maxTokens" type="range" min="32" max="2048" step="32" value="512"></div>
+        <div class="control"><label for="maxTokens">حداکثر خروجی</label><input class="number" id="maxTokens" type="number" min="32" max="100000" step="32" value="512"></div>
         <div class="control"><label for="seed">Seed</label><input class="number" id="seed" type="number" value="42"></div>
         <label class="switch-row"><span><b>حافظهٔ گفتگو</b><small>ادامهٔ مکالمه با cache پرامپت</small></span><input id="memory" type="checkbox" checked><i></i></label>
         <label class="switch-row"><span><b>Reasoning پایین</b><small>برای پاسخ سریع‌تر</small></span><input id="reasoning" type="checkbox" checked><i></i></label>

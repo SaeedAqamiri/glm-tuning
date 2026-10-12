@@ -14,6 +14,6 @@ exec numactl --interleave=all "$experiment/prefill-400/build/bin/llama-server" \
   -m /srv/models/glm53-gguf/UD-Q4_K_XL/GLM-5.3-Flash-UD-Q4_K_XL-00001-of-00006.gguf \
   --host "${BIND_HOST:-127.0.0.1}" --port "${PORT:-8017}" \
   -t "${DECODE_THREADS:-64}" -tb "${PREFILL_THREADS:-112}" \
-  -c 32768 -np 4 --numa distribute --load-mode mmap --lazy-mode off \
+  -c "${CTX:-32768}" -np 4 --numa distribute --load-mode mmap --lazy-mode off \
   "${cache_flags[@]}" --spec-type "${SPEC_TYPE:-draft-mtp}" \
   --spec-draft-n-max "${DRAFT_MAX:-1}" --spec-draft-p-min "${DRAFT_PMIN:-0}" "$@"

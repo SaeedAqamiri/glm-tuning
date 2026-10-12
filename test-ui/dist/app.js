@@ -65,9 +65,9 @@ function createAssistantBubble() {
   return view;
 }
 
-function readSettings() { return { temperature:+$('temperature').value, maxTokens:+$('maxTokens').value, seed:+$('seed').value, reasoning:$('reasoning').checked, systemPrompt:$('systemPrompt').value.trim(), memory:$('memory').checked }; }
+function readSettings() { return { temperature:+$('temperature').value, maxTokens:Math.min(100000,Math.max(32,+$('maxTokens').value||512)), seed:+$('seed').value, reasoning:$('reasoning').checked, systemPrompt:$('systemPrompt').value.trim(), memory:$('memory').checked }; }
 function saveSettings() { localStorage.setItem('glm-settings',JSON.stringify(readSettings())); }
-function applySettings(settings={}) { const s={...defaults,...settings}; for(const key of ['temperature','maxTokens','seed','systemPrompt']) $(key).value=s[key]; $('reasoning').checked=s.reasoning; $('memory').checked=s.memory; $('temperatureValue').textContent=(+s.temperature).toFixed(1); $('maxTokensValue').textContent=s.maxTokens; }
+function applySettings(settings={}) { const s={...defaults,...settings}; for(const key of ['temperature','maxTokens','seed','systemPrompt']) $(key).value=s[key]; $('reasoning').checked=s.reasoning; $('memory').checked=s.memory; $('temperatureValue').textContent=(+s.temperature).toFixed(1); }
 
 function updateMetrics(run) {
   const t=run?.timings||{}; const usage=run?.usage||{};
@@ -151,7 +151,7 @@ function exportHistory(){ const blob=new Blob([JSON.stringify(state.history,null
 $('chatForm').addEventListener('submit',runPrompt); $('stopBtn').onclick=()=>state.controller?.abort(); $('prompt').addEventListener('input',updateEstimate); $('prompt').addEventListener('keydown',e=>{if(e.ctrlKey&&e.key==='Enter')runPrompt(e)});
 $('clearBtn').onclick=()=>{ state.conversation=[]; $('messages').innerHTML='<div class="empty-state" id="emptyState"><div class="orb"><span></span></div><h2>گفتگوی جدید</h2><p>حافظهٔ کش پاک شد؛ پیام بعدی از صفر prefill می‌شود.</p></div>'; };
 $('exportBtn').onclick=exportHistory; $('resetSettings').onclick=()=>{applySettings(defaults);saveSettings();toast('تنظیمات بازنشانی شد')};
-for(const id of ['temperature','maxTokens']) $(id).addEventListener('input',()=>{ $(id+'Value').textContent=id==='temperature'?(+$(id).value).toFixed(1):$(id).value; saveSettings(); });
-for(const id of ['seed','reasoning','memory','systemPrompt']) $(id).addEventListener('change',saveSettings);
+for(const id of ['temperature']) $(id).addEventListener('input',()=>{ $(id+'Value').textContent=(+$(id).value).toFixed(1); saveSettings(); });
+for(const id of ['maxTokens','seed','reasoning','memory','systemPrompt']) $(id).addEventListener('change',saveSettings);
 document.querySelectorAll('[data-prompt]').forEach(b=>b.onclick=()=>{$('prompt').value=b.dataset.prompt;updateEstimate();$('prompt').focus()});
 applySettings(JSON.parse(localStorage.getItem('glm-settings')||'{}')); updateEstimate(); renderHistory(); if(state.history[0])updateMetrics(state.history[0]); checkHealth(); loadModelTag(); setInterval(checkHealth,15000);
