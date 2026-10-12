@@ -16,7 +16,7 @@ PORT = int(os.environ.get("GLM_UI_PORT", "8018"))
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "GLMTestUI/1.0"
+    server_version = "GLMTestUI/1.1"
 
     def log_message(self, fmt, *args):
         print(f"[{self.log_date_time_string()}] {fmt % args}", flush=True)
@@ -39,17 +39,40 @@ class Handler(BaseHTTPRequestHandler):
             UPSTREAM + path,
             data=body,
             method=method,
-            headers={"Content-Type": self.headers.get("Content-Type", "application/json")},
+            headers={
+                "Content-Type": self.headers.get("Content-Type", "application/json"),
+                "Accept": self.headers.get("Accept", "*/*"),
+            },
         )
         try:
-            with urllib.request.urlopen(req, timeout=900) as response:
-                payload = response.read()
-                self.send_bytes(response.status, payload, response.headers.get_content_type())
+            response = urllib.request.urlopen(req, timeout=900)
         except urllib.error.HTTPError as exc:
             self.send_bytes(exc.code, exc.read(), exc.headers.get_content_type())
+            return
         except Exception as exc:
             payload = json.dumps({"error": {"message": str(exc)}}).encode()
             self.send_bytes(502, payload, "application/json")
+            return
+
+        with response:
+            ctype = response.headers.get("Content-Type", "application/octet-stream")
+            if "text/event-stream" in ctype:
+                self.send_response(response.status)
+                self.send_header("Content-Type", ctype)
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("X-Accel-Buffering", "no")
+                self.end_headers()
+                try:
+                    while True:
+                        chunk = response.read(256)
+                        if not chunk:
+                            break
+                        self.wfile.write(chunk)
+                        self.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+            else:
+                self.send_bytes(response.status, response.read(), ctype)
 
     def do_GET(self):
         path = urlparse(self.path).path

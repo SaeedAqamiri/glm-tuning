@@ -1,5 +1,5 @@
 const $ = (id) => document.getElementById(id);
-const state = { history: JSON.parse(localStorage.getItem('glm-history') || '[]'), controller: null, run: 0 };
+const state = { history: JSON.parse(localStorage.getItem('glm-history') || '[]'), controller: null };
 const defaults = { temperature: 0, maxTokens: 512, seed: 42, reasoning: true, systemPrompt: '' };
 
 function esc(text='') { return text.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c])); }
@@ -18,11 +18,51 @@ async function checkHealth() {
   catch { el.className='connection offline'; el.querySelector('span').textContent='سرور در دسترس نیست'; }
 }
 
+async function loadModelTag() {
+  try {
+    const res=await fetch('/api/models'); const data=await res.json();
+    const name=(data.models?.[0]?.name || '').split('/').pop().replace(/\.gguf$/i,'').replace(/-00001-of-\d+$/,'');
+    if(name){ $('modelChip').textContent=name; $('modelChip').hidden=false; }
+  } catch {}
+}
+
 function addMessage(role, text, loading=false) {
   $('emptyState')?.classList.add('hidden');
   const node=document.createElement('article'); node.className=`message ${role}`;
   node.innerHTML=`<div class="avatar">${role==='user'?'شما':'GLM'}</div><div class="bubble"><div class="bubble-head"><b>${role==='user'?'پرامپت':'پاسخ مدل'}</b><span>${new Date().toLocaleTimeString('fa-IR',{hour:'2-digit',minute:'2-digit'})}</span></div><div class="bubble-content">${loading?'<span class="loader"><i></i><i></i><i></i></span>':formatContent(text)}</div></div>`;
-  $('messages').appendChild(node); $('messages').scrollTop=$('messages').scrollHeight; return node;
+  $('messages').appendChild(node); scrollMessages(); return node;
+}
+
+function scrollMessages(){ const m=$('messages'); m.scrollTop=m.scrollHeight; }
+
+function createAssistantBubble() {
+  const node=document.createElement('article'); node.className='message assistant streaming';
+  node.innerHTML=`<div class="avatar">GLM</div><div class="bubble">
+    <div class="bubble-head"><b>پاسخ مدل</b><span>${new Date().toLocaleTimeString('fa-IR',{hour:'2-digit',minute:'2-digit'})}</span></div>
+    <details class="reasoning hidden"><summary>فرایند تفکر مدل <span class="reasoning-len"></span></summary><div class="reasoning-body"></div></details>
+    <div class="bubble-content"><span class="loader"><i></i><i></i><i></i></span></div>
+    <div class="bubble-foot"><span class="live-badge hidden"><i></i><span class="live-text"></span></span></div>
+  </div>`;
+  $('messages').appendChild(node); scrollMessages();
+  const reasoningEl=node.querySelector('.reasoning'), reasoningBody=node.querySelector('.reasoning-body'),
+        reasoningLen=node.querySelector('.reasoning-len'), contentEl=node.querySelector('.bubble-content'),
+        liveEl=node.querySelector('.live-badge'), liveText=node.querySelector('.live-text');
+  const view={ reasoning:'', content:'', ntok:0, t0:0, raf:0,
+    paint(){
+      if(view.raf) return;
+      view.raf=requestAnimationFrame(()=>{ view.raf=0;
+        if(view.reasoning){ reasoningEl.classList.remove('hidden'); reasoningLen.textContent=`· ${view.reasoning.length.toLocaleString('fa-IR')} نویسه`; reasoningBody.innerHTML=formatContent(view.reasoning); }
+        contentEl.innerHTML=view.content?formatContent(view.content):'<span class="loader"><i></i><i></i><i></i></span>';
+        if(view.t0&&view.ntok){ liveEl.classList.remove('hidden'); const rate=view.ntok/((performance.now()-view.t0)/1000); liveText.textContent=`${rate.toFixed(1)} tok/s · ${view.ntok} توکن`; }
+        scrollMessages();
+      });
+    },
+    finalize(aborted=false){
+      node.classList.remove('streaming');
+      liveEl.classList.add('hidden');
+      if(aborted&&view.content) contentEl.innerHTML=formatContent(view.content)+'<p class="muted">— توقف توسط کاربر —</p>';
+    }};
+  return view;
 }
 
 function readSettings() { return { temperature:+$('temperature').value, maxTokens:+$('maxTokens').value, seed:+$('seed').value, reasoning:$('reasoning').checked, systemPrompt:$('systemPrompt').value.trim() }; }
@@ -34,7 +74,10 @@ function updateMetrics(run) {
   $('prefillRate').textContent=fmt(t.prompt_per_second); $('decodeRate').textContent=fmt(t.predicted_per_second);
   $('promptTokens').textContent=t.prompt_n ?? usage.prompt_tokens ?? '—'; $('outputTokens').textContent=t.predicted_n ?? usage.completion_tokens ?? '—';
   $('prefillTime').textContent=seconds(t.prompt_ms); $('decodeTime').textContent=seconds(t.predicted_ms); $('totalTime').textContent=seconds(run?.client_ms);
-  $('runId').textContent=run ? `#${String(run.id).padStart(3,'0')}` : '—'; $('rawJson').textContent=run?.raw ? JSON.stringify(run.raw,null,2) : '{}';
+  const draft=t.draft_n||0;
+  $('mtpRate').textContent=draft?`${Math.round(100*(t.draft_n_accepted||0)/draft)}٪`:'—';
+  $('runId').textContent=run ? `#${String(run.id).padStart(3,'0')}` : '—';
+  $('rawJson').textContent=JSON.stringify({timings:t,usage},null,2);
 }
 
 function renderHistory() {
@@ -48,21 +91,54 @@ function renderHistory() {
 
 async function runPrompt(event) {
   event?.preventDefault(); const prompt=$('prompt').value.trim(); if(!prompt||state.controller)return;
-  const settings=readSettings(); saveSettings(); addMessage('user',prompt); const pending=addMessage('assistant','',true);
+  const settings=readSettings(); saveSettings(); addMessage('user',prompt);
+  const view=createAssistantBubble();
   state.controller=new AbortController(); $('sendBtn').disabled=true; $('stopBtn').classList.remove('hidden'); const started=performance.now();
   const messages=[]; if(settings.systemPrompt) messages.push({role:'system',content:settings.systemPrompt}); messages.push({role:'user',content:prompt});
-  const body={messages,max_tokens:settings.maxTokens,temperature:settings.temperature,seed:settings.seed,cache_prompt:false,stream:false};
+  const body={messages,max_tokens:settings.maxTokens,temperature:settings.temperature,seed:settings.seed,cache_prompt:false,stream:true};
   if(settings.reasoning) body.chat_template_kwargs={reasoning_effort:'low'};
+  let timings=null, usage=null, aborted=false, failed=null;
   try {
     const res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal:state.controller.signal});
-    const raw=await res.json(); if(!res.ok) throw Error(raw?.error?.message||`HTTP ${res.status}`);
-    const content=raw.choices?.[0]?.message?.content ?? raw.choices?.[0]?.text ?? '';
-    pending.querySelector('.bubble-content').innerHTML=formatContent(content)||'<span class="muted">پاسخ متنی خالی بود.</span>';
-    const run={id:Date.now()%1000,prompt,content,settings,timings:raw.timings||{},usage:raw.usage||{},client_ms:performance.now()-started,raw,date:new Date().toISOString()};
-    state.history.unshift(run); state.history=state.history.slice(0,50); localStorage.setItem('glm-history',JSON.stringify(state.history)); updateMetrics(run); renderHistory(); $('prompt').value=''; updateEstimate(); toast('تست با موفقیت ثبت شد');
+    if(!res.ok){ const raw=await res.json().catch(()=>({})); throw Error(raw?.error?.message||`HTTP ${res.status}`); }
+    const reader=res.body.getReader(); const decoder=new TextDecoder(); let buf='';
+    while(true){
+      const {done,value}=await reader.read(); if(done) break;
+      buf+=decoder.decode(value,{stream:true});
+      let idx;
+      while((idx=buf.indexOf('\n'))>=0){
+        const line=buf.slice(0,idx).trim(); buf=buf.slice(idx+1);
+        if(!line.startsWith('data:')) continue;
+        const data=line.slice(5).trim();
+        if(data==='[DONE]') continue;
+        let chunk; try{ chunk=JSON.parse(data); }catch{ continue; }
+        const delta=chunk.choices?.[0]?.delta||{};
+        if(delta.reasoning_content){ if(!view.reasoning&&!view.content) view.t0=performance.now(); view.reasoning+=delta.reasoning_content; view.ntok++; }
+        if(delta.content){ if(!view.content) view.t0=performance.now(); view.content+=delta.content; view.ntok++; }
+        if(chunk.timings) timings=chunk.timings;
+        if(chunk.usage) usage=chunk.usage;
+        view.paint();
+      }
+    }
   } catch(err) {
-    pending.querySelector('.bubble-content').innerHTML=`<span style="color:var(--danger)">${err.name==='AbortError'?'درخواست متوقف شد.':esc(err.message)}</span>`; if(err.name!=='AbortError')toast(err.message,true);
-  } finally { state.controller=null; $('sendBtn').disabled=false; $('stopBtn').classList.add('hidden'); }
+    if(err.name==='AbortError') aborted=true; else failed=err.message;
+  }
+  view.finalize(aborted&&!failed);
+  const client_ms=performance.now()-started;
+  if(failed){
+    view.contentEl.innerHTML=`<span style="color:var(--danger)">${esc(failed)}</span>`;
+    toast(failed,true);
+  } else {
+    if(!view.content&&!view.reasoning) view.contentEl.innerHTML='<span class="muted">پاسخ متنی خالی بود.</span>';
+    const estPerSecond=view.ntok>1?view.ntok/((client_ms-(timings?.prompt_ms||0))/1000):undefined;
+    const run={id:Date.now()%1000,prompt:prompt.slice(0,160),content:view.content,reasoning:view.reasoning,settings,
+      timings:timings||{predicted_n:view.ntok,predicted_ms:client_ms,predicted_per_second:estPerSecond},
+      usage:usage||{},client_ms,aborted,date:new Date().toISOString()};
+    state.history.unshift(run); state.history=state.history.slice(0,50); localStorage.setItem('glm-history',JSON.stringify(state.history));
+    updateMetrics(run); renderHistory(); $('prompt').value=''; updateEstimate();
+    toast(aborted?'تست متوقف شد و ثبت گردید':'تست با موفقیت ثبت شد',aborted);
+  }
+  state.controller=null; $('sendBtn').disabled=false; $('stopBtn').classList.add('hidden');
 }
 
 function updateEstimate(){ $('tokenEstimate').textContent=`حدود ${estimateTokens($('prompt').value).toLocaleString('fa-IR')} توکن ورودی`; $('prompt').style.height='auto'; $('prompt').style.height=Math.min($('prompt').scrollHeight,220)+'px'; }
@@ -74,4 +150,4 @@ $('exportBtn').onclick=exportHistory; $('resetSettings').onclick=()=>{applySetti
 for(const id of ['temperature','maxTokens']) $(id).addEventListener('input',()=>{ $(id+'Value').textContent=id==='temperature'?(+$(id).value).toFixed(1):$(id).value; saveSettings(); });
 for(const id of ['seed','reasoning','systemPrompt']) $(id).addEventListener('change',saveSettings);
 document.querySelectorAll('[data-prompt]').forEach(b=>b.onclick=()=>{$('prompt').value=b.dataset.prompt;updateEstimate();$('prompt').focus()});
-applySettings(JSON.parse(localStorage.getItem('glm-settings')||'{}')); updateEstimate(); renderHistory(); if(state.history[0])updateMetrics(state.history[0]); checkHealth(); setInterval(checkHealth,15000);
+applySettings(JSON.parse(localStorage.getItem('glm-settings')||'{}')); updateEstimate(); renderHistory(); if(state.history[0])updateMetrics(state.history[0]); checkHealth(); loadModelTag(); setInterval(checkHealth,15000);
