@@ -1,0 +1,16 @@
+<!doctype html><html><head><meta charset="utf-8"><style>body{margin:0;background:#fff;font-family:Vazirmatn}</style></head>
+<body><pre class="mermaid">
+flowchart TD
+  A["ایدهٔ بهینه‌سازی"] --> B["پیچ روی کپی خصوصی<br/>worktree جدا"]
+  B --> C["تست‌های عددی/بایت‌دقیق<br/>QKV، MoE، مرجع مستقل"]
+  C -->|"ناموفق"| B
+  C -->|"موفق"| D["بنچمارک HTTP واقعی<br/>پرامپت ۱۸۶۰/۴۳۹۷ توکنی<br/>temp=0, seed=42, بدون کش"]
+  D -->|"خروجی نابرابر یا بی‌سود"| E["رد و ثبت دلیل"]
+  D -->|"سرعت بیشتر + خروجی عیناً یکسان"| F["تگ و باندل validated<br/>استقرار روی سرور"]
+  F -->|"'موضوع بعدی از پروفایل'"| A
+  style A fill:#fdf3e3,stroke:#c98a2b,stroke-width:2px
+  style F fill:#e8f7f0,stroke:#1f8a63,stroke-width:2px
+  style E fill:#fbe9ec,stroke:#c2455e,stroke-width:2px
+</pre>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({startOnLoad:true, theme:'default', flowchart:{useMaxWidth:false}, themeVariables:{fontSize:'18px'}});</script></body></html>

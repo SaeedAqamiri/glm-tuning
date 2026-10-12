@@ -1,0 +1,19 @@
+<!doctype html><html><head><meta charset="utf-8"><style>body{margin:0;background:#fff;font-family:Vazirmatn}</style></head>
+<body><pre class="mermaid">
+flowchart TD
+  P0["فاز ۰<br/>موتور اولیه<br/><span dir='ltr'>57.6 / 6.2</span>"] --> P1["فاز ۱<br/>اصلاح AMX MoE و NUMA<br/><span dir='ltr'>70.6 / 8.4</span>"]
+  P1 --> P2a["فاز ۲<br/>مسیر سریع CONCAT<br/><span dir='ltr'>93.8 / 9.3</span>"]
+  P2a --> P2b["ادامهٔ فاز ۲<br/>تکه‌تکه‌کردن GET_ROWS<br/><span dir='ltr'>91.2 / 13.4</span>"]
+  P2b --> P3a["فاز ۳<br/>MTP و کِرنل VNNI<br/><span dir='ltr'>105.6 / 16.4</span>"]
+  P3a --> P3b["ادامهٔ فاز ۳<br/>چک‌پوینت mtp-18p4<br/><span dir='ltr'>154.5 / 18.1</span>"]
+  P3b --> P4a["فاز ۴<br/>کِرنل‌های prefill<br/><span dir='ltr'>206.7 / 17.7</span>"]
+  P4a --> P4b["امروز<br/>کش پرامپت و کانتکست بزرگ<br/><span dir='ltr'>prefill گرم 9.4×</span>"]
+  classDef p0 fill:#f0f0f0,stroke:#777,stroke-width:2px
+  classDef p1 fill:#e3ecff,stroke:#4472c4,stroke-width:2px
+  classDef p2 fill:#fff3d6,stroke:#c98a2b,stroke-width:2px
+  classDef p3 fill:#e6f7d9,stroke:#5a9e3d,stroke-width:2px
+  classDef p4 fill:#fde8ef,stroke:#c2455e,stroke-width:2px
+  class P0 p0; class P1 p1; class P2a,P2b p2; class P3a,P3b p3; class P4a,P4b p4;
+</pre>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({startOnLoad:true, theme:'default', flowchart:{useMaxWidth:false,curve:'basis'}, themeVariables:{fontSize:'18px'}});</script></body></html>

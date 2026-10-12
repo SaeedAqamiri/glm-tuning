@@ -1,0 +1,16 @@
+<!doctype html><html><head><meta charset="utf-8"><style>body{margin:0;background:#fff;font-family:Vazirmatn}</style></head>
+<body><pre class="mermaid">
+flowchart TD
+  B["مرورگر کاربر<br/>رابط فارسی RTL"] -->|"استریم SSE<br/><span dir='ltr'>http :8018</span>"| P["پروکسی پایتونی<br/><span dir='ltr'>glm-test-ui</span>"]
+  P -->|"<span dir='ltr'>/v1/chat/completions</span>"| S["سرور آزمایشی<br/><span dir='ltr'>llama-server :8017</span><br/>کانتکست ۵۱۲K، کش فعال، MTP"]
+  S --> K["کِرنل‌های بهینه AMX<br/><span dir='ltr'>Q8 signed + Q4/Q5 scaled-K</span>"]
+  K --> N["دو سوکت Xeon<br/><span dir='ltr'>2× Xeon Platinum 8480+</span><br/>جانمایی NUMA، ۱۱۲ ثرد"]
+  N --> M["مدل کوانتیزه<br/><span dir='ltr'>Q4_K_XL · 186 GiB · mmap</span>"]
+  S2["سرور پایدار<br/><span dir='ltr'>llama-server :8016</span><br/>چک‌پوینت قدیمی<br/><span dir="ltr">checkpoint 13p3</span>"] -.-> M
+  classDef ui fill:#e8f7f0,stroke:#1f8a63,stroke-width:2px;
+  classDef srv fill:#e7f2fb,stroke:#2273b8,stroke-width:2px;
+  classDef hw fill:#f5f0ff,stroke:#6b4fd8,stroke-width:2px;
+  class B,P ui; class S,S2 srv; class K,N,M hw;
+</pre>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({startOnLoad:true, theme:'default', flowchart:{useMaxWidth:false}, themeVariables:{fontSize:'18px'}});</script></body></html>
