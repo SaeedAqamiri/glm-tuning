@@ -1,0 +1,14 @@
+{
+  "date": "2026-10-12",
+  "prompt": "fixed English real prompt, 1854 prompt tokens, max_tokens=1, temperature 0, seed 42, no prompt cache",
+  "config": "prefill-400 build 1a1d1ab, batch/ubatch 4096, 64 decode / 112 prefill threads, MTP cap 1",
+  "method": "each variant: fresh server restart, health wait, 2 back-to-back runs; all 4 variants measured in one session, back-to-back",
+  "note": "run1 is consistently ~8% slower than run2 (post-load warmup); comparisons use run2. Absolute numbers this session are higher than the originally recorded session (baseline 154.5 then vs 214.8 now), so cross-day comparisons are unreliable; within-session ordering is consistent.",
+  "results": [
+    {"variant": "none (both kernel flags off)",      "run1_tok_s": 197.0, "run2_tok_s": 214.8},
+    {"variant": "q8only (GGML_Q8_PREFILL_SIGNED=1)", "run1_tok_s": 209.1, "run2_tok_s": 226.5},
+    {"variant": "scaledonly (GGML_PREFILL_SCALED_K=1)","run1_tok_s": 205.1, "run2_tok_s": 224.1},
+    {"variant": "both (validated configuration)",    "run1_tok_s": 218.0, "run2_tok_s": 236.3}
+  ],
+  "conclusion": "Back-to-back on an idle machine: Q8 signed ~ +5.4%, Q4/Q5 scaled-K ~ +4.3%, combined ~ +9.9% over kernels-off on this prompt. Individual contributions are additive within measurement noise (~2 tok/s)."
+}

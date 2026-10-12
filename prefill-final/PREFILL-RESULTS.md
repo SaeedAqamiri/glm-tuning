@@ -27,3 +27,16 @@ Candidate: localhost8017, restart with run-prefill-validated.sh. Stable8016 stil
 Build: cmake -S prefill-400 -B prefill-400/build -DCMAKE_BUILD_TYPE=Release -DGGML_NATIVE=ON -DGGML_AMX=ON -DGGML_OPENMP=OFF -DCMAKE_CXX_FLAGS=-DGGML_AMX_Q8_UNSIGNED=1; cmake --build prefill-400/build --target llama-server -j24.
 
 Target400 has not been reached. Profiling at baseline identified dense/expert matmul as the main costs, followed by flash attention. The retained changes improve prefill while preserving tested complete outputs.
+
+## Kernel-flag ablation (2026-10-12, live)
+
+Same build and config, fixed English prompt (1854 tokens, max_tokens=1), fresh restart per variant, 2 runs each (run1 has ~8% post-load warmup cost; run2 quoted). All variants measured back-to-back in one session. See `prefill-ablation-20261012.json`.
+
+| Flags | Prefill tok/s (run2) | Δ vs none |
+|---|---:|---:|
+| none | 214.8 | — |
+| Q8 signed only | 226.5 | +5.4% |
+| Q4/Q5 scaled-K only | 224.1 | +4.3% |
+| both (validated) | 236.3 | +9.9% |
+
+Contributions are additive within noise and preserve output exactness. Caution: absolute numbers this session ran higher than the originally recorded session (kernels-off baseline 214.8 now vs 154.5 then) — machine state dominates day-to-day comparisons; only within-session comparisons are treated as evidence.
