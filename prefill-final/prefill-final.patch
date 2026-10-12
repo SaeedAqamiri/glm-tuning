@@ -1,0 +1,259 @@
+diff --git a/ggml/src/ggml-cpu/amx/mmq.cpp b/ggml/src/ggml-cpu/amx/mmq.cpp
+index b20ad00..8ca061b 100644
+--- a/ggml/src/ggml-cpu/amx/mmq.cpp
++++ b/ggml/src/ggml-cpu/amx/mmq.cpp
+@@ -224,27 +224,27 @@ struct tile_config_t{
+ //    advanced-matrix-extensions-intrinsics-functions.html
+ //
+ 
+-inline void ggml_tile_config_init(int rows = 16) {
+-    static thread_local int previous_rows = 0;
++inline void ggml_tile_config_init(int rows = 16, int width = 32) {
++    static thread_local int previous_config = 0;
+ 
+-    if (previous_rows == rows) {
++    if (previous_config == rows + width * 32) {
+         return;
+     }
+ 
+     alignas(64) tile_config_t tc = {};
+     tc.palette_id = 1;
+     tc.start_row = 0;
+-    tc.rows[0] = 8;   tc.colsb[0] = 64;
+-    tc.rows[1] = 8;   tc.colsb[1] = 64;
+-    tc.rows[2] = rows;  tc.colsb[2] = 32;
+-    tc.rows[3] = rows;  tc.colsb[3] = 32;
++    tc.rows[0] = width / 4;   tc.colsb[0] = 64;
++    tc.rows[1] = width / 4;   tc.colsb[1] = 64;
++    tc.rows[2] = rows;  tc.colsb[2] = width;
++    tc.rows[3] = rows;  tc.colsb[3] = width;
+     tc.rows[4] = rows;  tc.colsb[4] = 64;
+     tc.rows[5] = rows;  tc.colsb[5] = 64;
+     tc.rows[6] = rows;  tc.colsb[6] = 64;
+     tc.rows[7] = rows;  tc.colsb[7] = 64;
+ 
+     _tile_loadconfig(&tc);
+-    previous_rows = rows;
++    previous_config = rows + width * 32;
+ }
+ 
+ // we need an extra 16 * 4B (TILE_N * int32_t) for each NB/KB block for compensation.
+@@ -949,6 +949,17 @@ void unpack_B(packed_B_t * RESTRICT tile, const void * RESTRICT packed_B) {
+     GGML_UNUSED(packed_B);
+ }
+ 
++template <>
++void unpack_B<block_q8_0>(int8_t * RESTRICT tile, const void * RESTRICT packed_B) {
++    const __m512i offset = _mm512_set1_epi8((char) 0x80);
++    for (int i = 0; i < 8; ++i) {
++        const __m512i bytes = _mm512_loadu_si512((const char *) packed_B + i * 64);
++        _mm512_storeu_si512(tile + i * 64, _mm512_xor_si512(bytes, offset));
++    }
++    // Tile loads do not expose their source memory to GCC.
++    __asm__ volatile("" ::: "memory");
++}
++
+ template <>
+ void unpack_B<block_q4_0>(int8_t * RESTRICT tile, const void * RESTRICT packed_B) {
+   const __m512i off = _mm512_set1_epi8(8);
+@@ -1135,14 +1146,14 @@ struct acc_C<block_q8_1, block_q4_1, is_acc> {
+ 
+ template <bool is_acc>
+ struct acc_C<block_q8_0, block_q8_0, is_acc> {
+-    static void apply(float * RESTRICT C, int ldc, const int32_t * RESTRICT tile, const block_q8_0 * A, int lda, const void * packed_B, int nr) {
++    static void apply(float * RESTRICT C, int ldc, const int32_t * RESTRICT tile, const block_q8_0 * A, int lda, const void * packed_B, int nr, bool signed_q8 = false) {
+         const int offset = TILE_N * TILE_K;
+         const __m512 vd0 = _mm512_cvtph_ps(_mm256_loadu_si256((const __m256i *)((const char *)packed_B + offset)));
+ 
+         for (int m = 0; m < nr; ++m) {
+             const __m512 vd1 = _mm512_set1_ps(GGML_CPU_FP16_TO_FP32(A[m * lda].d));
+             __m512i vi=_mm512_loadu_si512(tile+m*TILE_N);
+-            if constexpr(q8_unsigned) vi=_mm512_sub_epi32(vi,_mm512_set1_epi32(q8_input_compensation(&A[m*lda])));
++            if (q8_unsigned && !signed_q8) vi=_mm512_sub_epi32(vi,_mm512_set1_epi32(q8_input_compensation(&A[m*lda])));
+             const __m512 vtile=_mm512_cvtepi32_ps(vi);
+ 
+             __m512 vsum;
+@@ -2302,8 +2313,17 @@ struct tinygemm_kernel_vnni<block_q8_K, block_iq4_xs, float, BLOCK_M, BLOCK_N, B
+         (const char *)src0->data + src0_offset + PACKED_INDEX(nb * kTilesN, 0, KB, TILE_SIZE), \
+         (float *) ((char *) dst->data + dst_offset) + nb_start, ldc)
+ 
++template <typename TA, typename TB, bool is_acc>
++inline void acc_amx(float * C, int ldc, const int32_t * tile, const TA * A, int lda, const void * B, int nr, bool signed_q8) {
++    if constexpr (std::is_same<TB, block_q8_0>::value) {
++        acc_C<TA, TB, is_acc>::apply(C, ldc, tile, A, lda, B, nr, signed_q8);
++    } else {
++        acc_C<TA, TB, is_acc>::apply(C, ldc, tile, A, lda, B, nr);
++    }
++}
++
+ #define AMX_WEIGHT_DOT(D, A, B) do { \
+- if constexpr(q8_unsigned && std::is_same<TB,block_q8_0>::value) _tile_dpbsud(D,A,B); \
++ if constexpr(q8_unsigned && std::is_same<TB,block_q8_0>::value) { if (signed_q8) _tile_dpbssd(D,A,B); else _tile_dpbsud(D,A,B); } \
+  else _tile_dpbssd(D,A,B); \
+ } while (0)
+ 
+@@ -2312,7 +2332,8 @@ template <typename TA, typename TB, typename TC, int BLOCK_K,
+ void tinygemm_kernel_amx(int M, int N, int KB, const void * RESTRICT _A, const void * RESTRICT _B, TC * RESTRICT C, int ldc) {
+     using packed_B_t = packed_B_type<TB>;
+     const int TILE_SIZE = get_tile_size<TB>();
+-    const bool need_unpack = do_unpack<TB>::value;
++    const bool signed_q8 = q8_unsigned && std::is_same<TB, block_q8_0>::value && M > 2 && getenv("GGML_Q8_PREFILL_SIGNED");
++    const bool need_unpack = do_unpack<TB>::value || signed_q8;
+ 
+     GGML_ASSERT(M <= 2 * TILE_M && N == 2 * TILE_N);
+     const TA * RESTRICT A = static_cast<const TA *>(_A);
+@@ -2390,14 +2411,14 @@ void tinygemm_kernel_amx(int M, int N, int KB, const void * RESTRICT _A, const v
+                 }
+                 _tile_zero(TMM4);
+                 _tile_loadd(TMM2, A[i].qs, lda);
+-                acc_C<TA, TB, is_acc>::apply(C, ldc, Tile4(C_pre), &A[ii], KB, B + PACKED_INDEX(0, ii, KB, TILE_SIZE), TILE_M);
++                acc_amx<TA, TB, is_acc>(C, ldc, Tile4(C_pre), &A[ii], KB, B + PACKED_INDEX(0, ii, KB, TILE_SIZE), TILE_M, signed_q8);
+ 
+                 AMX_WEIGHT_DOT(TMM4,TMM2,TMM0);
+                 _tile_stored(TMM4, Tile4(C_cur), TILE_N * sizeof(int32_t));
+ 
+                 _tile_zero(TMM5);
+                 _tile_loadd(TMM3, A[TILE_M * KB + i].qs, lda);
+-                acc_C<TA, TB, is_acc>::apply(C + TILE_M * ldc, ldc, Tile5(C_pre), &A[TILE_M * KB + ii], KB, B + PACKED_INDEX(0, ii, KB, TILE_SIZE), TILE_M);
++                acc_amx<TA, TB, is_acc>(C + TILE_M * ldc, ldc, Tile5(C_pre), &A[TILE_M * KB + ii], KB, B + PACKED_INDEX(0, ii, KB, TILE_SIZE), TILE_M, signed_q8);
+ 
+                 AMX_WEIGHT_DOT(TMM5,TMM3,TMM0);
+                 _tile_stored(TMM5, Tile5(C_cur), TILE_N * sizeof(int32_t));
+@@ -2409,13 +2430,13 @@ void tinygemm_kernel_amx(int M, int N, int KB, const void * RESTRICT _A, const v
+                     _tile_loadd(TMM1, B_blk1, TILE_N * VNNI_BLK);
+                 }
+                 _tile_zero(TMM6);
+-                acc_C<TA, TB, is_acc>::apply(C + TILE_N, ldc, Tile6(C_pre), &A[ii], KB, B + PACKED_INDEX(1, ii, KB, TILE_SIZE), TILE_M);
++                acc_amx<TA, TB, is_acc>(C + TILE_N, ldc, Tile6(C_pre), &A[ii], KB, B + PACKED_INDEX(1, ii, KB, TILE_SIZE), TILE_M, signed_q8);
+ 
+                 AMX_WEIGHT_DOT(TMM6,TMM2,TMM1);
+                 _tile_stored(TMM6, Tile6(C_cur), TILE_N * sizeof(int32_t));
+ 
+                 _tile_zero(TMM7);
+-                acc_C<TA, TB, is_acc>::apply(C + TILE_M * ldc + TILE_N, ldc, Tile7(C_pre), &A[TILE_M * KB + ii], KB, B + PACKED_INDEX(1, ii, KB, TILE_SIZE), TILE_M);
++                acc_amx<TA, TB, is_acc>(C + TILE_M * ldc + TILE_N, ldc, Tile7(C_pre), &A[TILE_M * KB + ii], KB, B + PACKED_INDEX(1, ii, KB, TILE_SIZE), TILE_M, signed_q8);
+ 
+                 AMX_WEIGHT_DOT(TMM7,TMM3,TMM1);
+                 _tile_stored(TMM7, Tile7(C_cur), TILE_N * sizeof(int32_t));
+@@ -2426,10 +2447,10 @@ void tinygemm_kernel_amx(int M, int N, int KB, const void * RESTRICT _A, const v
+         // final accumulation
+         {
+             int ii = KB - 1;
+-            acc_C<TA, TB, true>::apply(C, ldc, Tile4(C_pre), &A[ii], KB, B + PACKED_INDEX(0, ii, KB, TILE_SIZE), TILE_M);
+-            acc_C<TA, TB, true>::apply(C + TILE_M * ldc, ldc, Tile5(C_pre), &A[TILE_M * KB + ii], KB, B + PACKED_INDEX(0, ii, KB, TILE_SIZE), TILE_M);
+-            acc_C<TA, TB, true>::apply(C + TILE_N, ldc, Tile6(C_pre), &A[ii], KB, B + PACKED_INDEX(1, ii, KB, TILE_SIZE), TILE_M);
+-            acc_C<TA, TB, true>::apply(C + TILE_M * ldc + TILE_N, ldc, Tile7(C_pre), &A[TILE_M * KB + ii], KB, B + PACKED_INDEX(1, ii, KB, TILE_SIZE), TILE_M);
++            acc_amx<TA, TB, true>(C, ldc, Tile4(C_pre), &A[ii], KB, B + PACKED_INDEX(0, ii, KB, TILE_SIZE), TILE_M, signed_q8);
++            acc_amx<TA, TB, true>(C + TILE_M * ldc, ldc, Tile5(C_pre), &A[TILE_M * KB + ii], KB, B + PACKED_INDEX(0, ii, KB, TILE_SIZE), TILE_M, signed_q8);
++            acc_amx<TA, TB, true>(C + TILE_N, ldc, Tile6(C_pre), &A[ii], KB, B + PACKED_INDEX(1, ii, KB, TILE_SIZE), TILE_M, signed_q8);
++            acc_amx<TA, TB, true>(C + TILE_M * ldc + TILE_N, ldc, Tile7(C_pre), &A[TILE_M * KB + ii], KB, B + PACKED_INDEX(1, ii, KB, TILE_SIZE), TILE_M, signed_q8);
+         }
+     } else {
+         for (int i = 0; i < KB; ++i) {
+@@ -2470,8 +2491,8 @@ void tinygemm_kernel_amx(int M, int N, int KB, const void * RESTRICT _A, const v
+             _tile_stored(TMM6, Tile6(C_cur), TILE_N * sizeof(int32_t));
+ 
+             GGML_DISPATCH_BOOL(i > 0, is_acc, [&] {
+-                acc_C<TA, TB, is_acc>::apply(C,          ldc, Tile4(C_cur), &A[i], KB, B + PACKED_INDEX(0, i, KB, TILE_SIZE), m0);
+-                acc_C<TA, TB, is_acc>::apply(C + TILE_N, ldc, Tile6(C_cur), &A[i], KB, B + PACKED_INDEX(1, i, KB, TILE_SIZE), m0);
++                acc_amx<TA, TB, is_acc>(C,          ldc, Tile4(C_cur), &A[i], KB, B + PACKED_INDEX(0, i, KB, TILE_SIZE), m0, signed_q8);
++                acc_amx<TA, TB, is_acc>(C + TILE_N, ldc, Tile6(C_cur), &A[i], KB, B + PACKED_INDEX(1, i, KB, TILE_SIZE), m0, signed_q8);
+             });
+ 
+             if (m1 != 0) {
+@@ -2483,8 +2504,8 @@ void tinygemm_kernel_amx(int M, int N, int KB, const void * RESTRICT _A, const v
+                 _tile_stored(TMM5, Tile5(C_cur), TILE_N * sizeof(int32_t));
+                 _tile_stored(TMM7, Tile7(C_cur), TILE_N * sizeof(int32_t));
+                 GGML_DISPATCH_BOOL(i > 0, is_acc, [&] {
+-                    acc_C<TA, TB, is_acc>::apply(C + TILE_M * ldc,          ldc, Tile5(C_cur), &A[TILE_M * KB + i], KB, B + PACKED_INDEX(0, i, KB, TILE_SIZE), m1);
+-                    acc_C<TA, TB, is_acc>::apply(C + TILE_M * ldc + TILE_N, ldc, Tile7(C_cur), &A[TILE_M * KB + i], KB, B + PACKED_INDEX(1, i, KB, TILE_SIZE), m1);
++                    acc_amx<TA, TB, is_acc>(C + TILE_M * ldc,          ldc, Tile5(C_cur), &A[TILE_M * KB + i], KB, B + PACKED_INDEX(0, i, KB, TILE_SIZE), m1, signed_q8);
++                    acc_amx<TA, TB, is_acc>(C + TILE_M * ldc + TILE_N, ldc, Tile7(C_cur), &A[TILE_M * KB + i], KB, B + PACKED_INDEX(1, i, KB, TILE_SIZE), m1, signed_q8);
+                 });
+             }
+         }
+@@ -2492,10 +2513,84 @@ void tinygemm_kernel_amx(int M, int N, int KB, const void * RESTRICT _A, const v
+     return;
+ }
+ 
++// Apply integer group scales before the dot product, using two byte planes.
++template <typename TB>
++void tinygemm_scaled_k(int M, int KB, const block_q8_K * A, const char * B, float * C, int ldc) {
++    const int TS = get_tile_size<TB>();
++    alignas(64) static thread_local uint8_t planes[2][2][4096];
++    alignas(64) int8_t raw[512];
++    alignas(64) int32_t low0[256], high0[256], low1[256], high1[256];
++    const __m512i mask = _mm512_set1_epi16(255);
++    const int rows = std::min(M, 16);
++    ggml_tile_config_init(rows, 64);
++    for (int i = 0; i < KB; ++i) {
++        for (int n = 0; n < 2; ++n) {
++            const char * bp = B + PACKED_INDEX(n, i, KB, TS);
++            const uint8_t * scales = (const uint8_t *) bp + get_quants_size<TB>();
++            for (int g = 0; g < 8; ++g) {
++                unpack_B<TB>(raw, bp, g);
++                __m512i scale = _mm512_cvtepu8_epi32(_mm_loadu_si128((const __m128i *)(scales + g * 16)));
++                scale = _mm512_or_si512(scale, _mm512_slli_epi32(scale, 16));
++                for (int k = 0; k < 8; ++k) {
++                    const __m512i q = _mm512_load_si512(raw + k * 64);
++                    const __m512i even = _mm512_mullo_epi16(_mm512_and_si512(q, mask), scale);
++                    const __m512i odd = _mm512_mullo_epi16(_mm512_srli_epi16(q, 8), scale);
++                    const __m512i lo = _mm512_or_si512(_mm512_and_si512(even, mask), _mm512_slli_epi16(odd, 8));
++                    const __m512i hi = _mm512_or_si512(_mm512_srli_epi16(even, 8), _mm512_andnot_si512(mask, odd));
++                    _mm512_store_si512(planes[n][0] + g * 512 + k * 64, lo);
++                    _mm512_store_si512(planes[n][1] + g * 512 + k * 64, hi);
++                }
++            }
++        }
++        __asm__ volatile("" ::: "memory");
++        for (int m = 0; m < M; m += 16) {
++            const int nr = std::min(16, M - m);
++            // The final partial tile uses the same rows; padded results are ignored.
++            _tile_zero(TMM4); _tile_zero(TMM5); _tile_zero(TMM6); _tile_zero(TMM7);
++            for (int k = 0; k < 4; ++k) {
++                if (nr == rows) {
++                    _tile_loadd(TMM2, A[m * KB + i].qs + k * 64, KB * sizeof(block_q8_K));
++                } else {
++                    alignas(64) int8_t tail[16][64] = {};
++                    for (int r = 0; r < nr; ++r) memcpy(tail[r], A[(m+r) * KB + i].qs + k*64, 64);
++                    // GCC tile loads do not declare their memory inputs.
++                    __asm__ volatile("" ::: "memory");
++                    _tile_loadd(TMM2, tail, 64);
++                    __asm__ volatile("" ::: "memory");
++                }
++                _tile_loadd(TMM0, planes[0][0] + k * 1024, 64);
++                _tile_loadd(TMM1, planes[0][1] + k * 1024, 64);
++                _tile_dpbsud(TMM4, TMM2, TMM0); _tile_dpbsud(TMM5, TMM2, TMM1);
++                _tile_loadd(TMM0, planes[1][0] + k * 1024, 64);
++                _tile_loadd(TMM1, planes[1][1] + k * 1024, 64);
++                _tile_dpbsud(TMM6, TMM2, TMM0); _tile_dpbsud(TMM7, TMM2, TMM1);
++            }
++            _tile_stored(TMM4, low0, 64); _tile_stored(TMM5, high0, 64);
++            _tile_stored(TMM6, low1, 64); _tile_stored(TMM7, high1, 64);
++            for (int r = 0; r < nr; ++r) {
++                _mm512_store_si512(low0+r*16, _mm512_add_epi32(_mm512_load_si512(low0+r*16), _mm512_slli_epi32(_mm512_load_si512(high0+r*16), 8)));
++                _mm512_store_si512(low1+r*16, _mm512_add_epi32(_mm512_load_si512(low1+r*16), _mm512_slli_epi32(_mm512_load_si512(high1+r*16), 8)));
++            }
++            GGML_DISPATCH_BOOL(i > 0, is_acc, [&] {
++                acc_C<block_q8_K, TB, is_acc>::apply(C+m*ldc, ldc, low0, &A[m*KB+i], KB, B+PACKED_INDEX(0,i,KB,TS), nr);
++                acc_C<block_q8_K, TB, is_acc>::apply(C+m*ldc+16, ldc, low1, &A[m*KB+i], KB, B+PACKED_INDEX(1,i,KB,TS), nr);
++            });
++        }
++    }
++}
++
+ template <typename TA, typename TB, typename TC, int BLOCK_K,
+           typename std::enable_if<is_type_qkk<TB>::value, int>::type = 0>
+ void tinygemm_kernel_amx(int M, int N, int KB, const void * RESTRICT _A, const void * RESTRICT _B, float * RESTRICT C, int ldc) {
++    const bool signed_q8 = false;
+     static_assert(std::is_same<TA, block_q8_K>::value);
++    if constexpr (std::is_same<TB, block_q4_K>::value || std::is_same<TB, block_q5_K>::value) {
++        if (M > 2 && getenv("GGML_PREFILL_SCALED_K")) {
++            tinygemm_scaled_k<TB>(M, KB, (const block_q8_K *) _A, (const char *) _B, C, ldc);
++            return;
++        }
++    }
++
+     const int TILE_SIZE = get_tile_size<TB>();
+ 
+     GGML_ASSERT(M <= 2 * TILE_M && N == 2 * TILE_N);

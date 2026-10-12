@@ -1,0 +1,358 @@
+[
+  {
+    "config": "baseline",
+    "pp": 512,
+    "wall_s": 29.360114117999956,
+    "timings": {
+      "cache_n": 0,
+      "prompt_n": 512,
+      "prompt_ms": 8888.985,
+      "prompt_per_token_ms": 17.361298828125,
+      "prompt_per_second": 57.59937720673395,
+      "predicted_n": 128,
+      "predicted_ms": 20468.67,
+      "predicted_per_token_ms": 161.17062992125983,
+      "predicted_per_second": 6.204604402728658
+    },
+    "content": " require additional storage and maintenance when data changes. Transactions group operations into a single unit that either completes or is rolled back. Engineers measure latency and throughput separa"
+  },
+  {
+    "config": "baseline",
+    "pp": 2048,
+    "wall_s": 56.86560259099997,
+    "timings": {
+      "cache_n": 0,
+      "prompt_n": 2048,
+      "prompt_ms": 36030.334,
+      "prompt_per_token_ms": 17.5929365234375,
+      "prompt_per_second": 56.84099403574776,
+      "predicted_n": 128,
+      "predicted_ms": 20832.016,
+      "predicted_per_token_ms": 164.0316220472441,
+      "predicted_per_second": 6.096385486647092
+    },
+    "content": " records efficiently, but require additional storage and maintenance when data changes. Transactions group operations into a single unit that either completes or is rolled back. Engineers measure late"
+  },
+  {
+    "config": "amx-moe",
+    "pp": 512,
+    "wall_s": 25.20535579699981,
+    "timings": {
+      "cache_n": 0,
+      "prompt_n": 512,
+      "prompt_ms": 7365.177,
+      "prompt_per_token_ms": 14.385111328125,
+      "prompt_per_second": 69.51631983861353,
+      "predicted_n": 128,
+      "predicted_ms": 17551.369,
+      "predicted_per_token_ms": 138.1997559055118,
+      "predicted_per_second": 7.235902794819026
+    },
+    "content": " require additional storage and maintenance when data changes. Transactions group operations into a single unit that either completes or is rolled back. Engineers measure latency and throughput separa"
+  },
+  {
+    "config": "amx-moe",
+    "pp": 2048,
+    "wall_s": 46.631410684,
+    "timings": {
+      "cache_n": 0,
+      "prompt_n": 2048,
+      "prompt_ms": 28426.619,
+      "prompt_per_token_ms": 13.88018505859375,
+      "prompt_per_second": 72.04514895000352,
+      "predicted_n": 128,
+      "predicted_ms": 18201.774,
+      "predicted_per_token_ms": 143.32105511811025,
+      "predicted_per_second": 6.977341878874004
+    },
+    "content": " records efficiently, but require additional storage and maintenance when data changes. Transactions group operations into a single unit that either completes or is rolled back. Engineers measure late"
+  },
+  {
+    "config": "amx-single",
+    "pp": 512,
+    "wall_s": 24.20662584899992,
+    "timings": {
+      "cache_n": 0,
+      "prompt_n": 512,
+      "prompt_ms": 7816.97,
+      "prompt_per_token_ms": 15.26751953125,
+      "prompt_per_second": 65.49852436429973,
+      "predicted_n": 128,
+      "predicted_ms": 16387.227,
+      "predicted_per_token_ms": 129.03328346456692,
+      "predicted_per_second": 7.749938412398877
+    },
+    "content": " require additional storage and maintenance when data changes. Transactions group operations into a single unit that either completes or is rolled back. Engineers measure latency and throughput separa"
+  },
+  {
+    "config": "amx-single",
+    "pp": 2048,
+    "wall_s": 54.267450424000344,
+    "timings": {
+      "cache_n": 0,
+      "prompt_n": 2048,
+      "prompt_ms": 37412.295,
+      "prompt_per_token_ms": 18.26772216796875,
+      "prompt_per_second": 54.7413624317888,
+      "predicted_n": 128,
+      "predicted_ms": 16852.361,
+      "predicted_per_token_ms": 132.69575590551182,
+      "predicted_per_second": 7.536036048598769
+    },
+    "content": " records efficiently, but require additional storage and maintenance when data changes. Transactions group operations into a single unit that either completes or is rolled back. Engineers measure late"
+  },
+  {
+    "config": "amx-batched-pin",
+    "pp": 512,
+    "wall_s": 25.945452578000186,
+    "timings": {
+      "cache_n": 0,
+      "prompt_n": 512,
+      "prompt_ms": 7740.894,
+      "prompt_per_token_ms": 15.11893359375,
+      "prompt_per_second": 66.14223111697434,
+      "predicted_n": 128,
+      "predicted_ms": 18201.811,
+      "predicted_per_token_ms": 143.32134645669294,
+      "predicted_per_second": 6.9773276955793015
+    },
+    "content": " require additional storage and maintenance when data changes. Transactions group operations into a single unit that either completes or is rolled back. Engineers measure latency and throughput separa"
+  },
+  {
+    "config": "amx-batched-pin",
+    "pp": 2048,
+    "wall_s": 48.425465134000206,
+    "timings": {
+      "cache_n": 0,
+      "prompt_n": 2048,
+      "prompt_ms": 30191.531,
+      "prompt_per_token_ms": 14.74195849609375,
+      "prompt_per_second": 67.8335921421143,
+      "predicted_n": 128,
+      "predicted_ms": 18230.801,
+      "predicted_per_token_ms": 143.54961417322835,
+      "predicted_per_second": 6.966232586269798
+    },
+    "content": " records efficiently, but require additional storage and maintenance when data changes. Transactions group operations into a single unit that either completes or is rolled back. Engineers measure late"
+  },
+  {
+    "config": "amx-tree",
+    "pp": 512,
+    "wall_s": 24.634744026000135,
+    "timings": {
+      "cache_n": 0,
+      "prompt_n": 512,
+      "prompt_ms": 7308.637,
+      "prompt_per_token_ms": 14.274681640625,
+      "prompt_per_second": 70.05410174291048,
+      "predicted_n": 128,
+      "predicted_ms": 17323.464,
+      "predicted_per_token_ms": 136.40522834645668,
+      "predicted_per_second": 7.331097290934423
+    },
+    "content": " require additional storage and maintenance when data changes. Transactions group operations into a single unit that either completes or is rolled back. Engineers measure latency and throughput separa"
+  },
+  {
+    "config": "amx-tree",
+    "pp": 2048,
+    "wall_s": 45.812472191000325,
+    "timings": {
+      "cache_n": 0,
+      "prompt_n": 2048,
+      "prompt_ms": 28012.509,
+      "prompt_per_token_ms": 13.67798291015625,
+      "prompt_per_second": 73.110195163168,
+      "predicted_n": 128,
+      "predicted_ms": 17797.186,
+      "predicted_per_token_ms": 140.13532283464568,
+      "predicted_per_second": 7.135959583722954
+    },
+    "content": " records efficiently, but require additional storage and maintenance when data changes. Transactions group operations into a single unit that either completes or is rolled back. Engineers measure late"
+  },
+  {
+    "config": "amx-numarows",
+    "pp": 512,
+    "wall_s": 23.676303794999967,
+    "timings": {
+      "cache_n": 0,
+      "prompt_n": 512,
+      "prompt_ms": 7226.836,
+      "prompt_per_token_ms": 14.1149140625,
+      "prompt_per_second": 70.84704841786917,
+      "predicted_n": 128,
+      "predicted_ms": 16446.755,
+      "predicted_per_token_ms": 129.50200787401576,
+      "predicted_per_second": 7.721887995534681
+    },
+    "content": " require additional storage and maintenance when data changes. Transactions group operations into a single unit that either completes or is rolled back. Engineers measure latency and throughput separa"
+  },
+  {
+    "config": "amx-numarows",
+    "pp": 2048,
+    "wall_s": 45.428672803000154,
+    "timings": {
+      "cache_n": 0,
+      "prompt_n": 2048,
+      "prompt_ms": 28315.489,
+      "prompt_per_token_ms": 13.82592236328125,
+      "prompt_per_second": 72.3279050557806,
+      "predicted_n": 128,
+      "predicted_ms": 17110.204,
+      "predicted_per_token_ms": 134.7260157480315,
+      "predicted_per_second": 7.422471409458355
+    },
+    "content": " records efficiently, but require additional storage and maintenance when data changes. Transactions group operations into a single unit that either completes or is rolled back. Engineers measure late"
+  },
+  {
+    "config": "amx-mtp",
+    "pp": 512,
+    "wall_s": 22.11402890699992,
+    "timings": {
+      "cache_n": 0,
+      "prompt_n": 512,
+      "prompt_ms": 7839.614,
+      "prompt_per_token_ms": 15.31174609375,
+      "prompt_per_second": 65.30933793424013,
+      "predicted_n": 128,
+      "predicted_ms": 14271.711,
+      "predicted_per_token_ms": 112.37567716535433,
+      "predicted_per_second": 8.898722795045389,
+      "draft_n": 95,
+      "draft_n_accepted": 95
+    },
+    "content": " require additional storage and maintenance when data changes. Transactions group operations into a single unit that either completes or is rolled back. Engineers measure latency and throughput separa"
+  },
+  {
+    "config": "amx-mtp",
+    "pp": 2048,
+    "wall_s": 44.42748088799999,
+    "timings": {
+      "cache_n": 0,
+      "prompt_n": 2048,
+      "prompt_ms": 30035.829,
+      "prompt_per_token_ms": 14.66593212890625,
+      "prompt_per_second": 68.18523304284359,
+      "predicted_n": 128,
+      "predicted_ms": 14388.708,
+      "predicted_per_token_ms": 113.29691338582677,
+      "predicted_per_second": 8.826365786281853,
+      "draft_n": 95,
+      "draft_n_accepted": 95
+    },
+    "content": " records efficiently, but require additional storage and maintenance when data changes. Transactions group operations into a single unit that either completes or is rolled back. Engineers measure late"
+  },
+  {
+    "config": "amx-mtp-small",
+    "pp": 512,
+    "wall_s": 21.73662438800011,
+    "timings": {
+      "cache_n": 0,
+      "prompt_n": 512,
+      "prompt_ms": 7918.092,
+      "prompt_per_token_ms": 15.4650234375,
+      "prompt_per_second": 64.66204232029635,
+      "predicted_n": 128,
+      "predicted_ms": 13815.78,
+      "predicted_per_token_ms": 108.78566929133859,
+      "predicted_per_second": 9.192387255732214,
+      "draft_n": 95,
+      "draft_n_accepted": 95
+    },
+    "content": " require additional storage and maintenance when data changes. Transactions group operations into a single unit that either completes or is rolled back. Engineers measure latency and throughput separa"
+  },
+  {
+    "config": "amx-mtp-small",
+    "pp": 2048,
+    "wall_s": 43.82338521599968,
+    "timings": {
+      "cache_n": 0,
+      "prompt_n": 2048,
+      "prompt_ms": 30082.811,
+      "prompt_per_token_ms": 14.68887255859375,
+      "prompt_per_second": 68.0787443699992,
+      "predicted_n": 128,
+      "predicted_ms": 13737.538,
+      "predicted_per_token_ms": 108.1695905511811,
+      "predicted_per_second": 9.24474239852876,
+      "draft_n": 95,
+      "draft_n_accepted": 95
+    },
+    "content": " records efficiently, but require additional storage and maintenance when data changes. Transactions group operations into a single unit that either completes or is rolled back. Engineers measure late"
+  },
+  {
+    "config": "amx-mtp7",
+    "pp": 512,
+    "wall_s": 19.449976101000175,
+    "timings": {
+      "cache_n": 0,
+      "prompt_n": 512,
+      "prompt_ms": 8068.912,
+      "prompt_per_token_ms": 15.75959375,
+      "prompt_per_second": 63.45341230639273,
+      "predicted_n": 128,
+      "predicted_ms": 11378.317,
+      "predicted_per_token_ms": 89.59304724409448,
+      "predicted_per_second": 11.161580398928946,
+      "draft_n": 112,
+      "draft_n_accepted": 111
+    },
+    "content": " require additional storage and maintenance when data changes. Transactions group operations into a single unit that either completes or is rolled back. Engineers measure latency and throughput separa"
+  },
+  {
+    "config": "amx-mtp7",
+    "pp": 2048,
+    "wall_s": 41.618121522000365,
+    "timings": {
+      "cache_n": 0,
+      "prompt_n": 2048,
+      "prompt_ms": 30505.405,
+      "prompt_per_token_ms": 14.89521728515625,
+      "prompt_per_second": 67.1356436670813,
+      "predicted_n": 128,
+      "predicted_ms": 11109.74,
+      "predicted_per_token_ms": 87.47826771653543,
+      "predicted_per_second": 11.431410636072492,
+      "draft_n": 111,
+      "draft_n_accepted": 111
+    },
+    "content": " records efficiently, but require additional storage and maintenance when data changes. Transactions group operations into a single unit that either completes or is rolled back. Engineers measure late"
+  },
+  {
+    "config": "amx-mtp7-pmin",
+    "pp": 512,
+    "wall_s": 19.15015177299938,
+    "timings": {
+      "cache_n": 0,
+      "prompt_n": 512,
+      "prompt_ms": 7899.178,
+      "prompt_per_token_ms": 15.42808203125,
+      "prompt_per_second": 64.8168708187105,
+      "predicted_n": 128,
+      "predicted_ms": 11248.302,
+      "predicted_per_token_ms": 88.56930708661417,
+      "predicted_per_second": 11.290593015728064,
+      "draft_n": 112,
+      "draft_n_accepted": 111
+    },
+    "content": " require additional storage and maintenance when data changes. Transactions group operations into a single unit that either completes or is rolled back. Engineers measure latency and throughput separa"
+  },
+  {
+    "config": "amx-mtp7-pmin",
+    "pp": 2048,
+    "wall_s": 41.87807421300022,
+    "timings": {
+      "cache_n": 0,
+      "prompt_n": 2048,
+      "prompt_ms": 30477.607,
+      "prompt_per_token_ms": 14.88164404296875,
+      "prompt_per_second": 67.19687671016953,
+      "predicted_n": 128,
+      "predicted_ms": 11397.552,
+      "predicted_per_token_ms": 89.74450393700788,
+      "predicted_per_second": 11.142743634773502,
+      "draft_n": 111,
+      "draft_n_accepted": 111
+    },
+    "content": " records efficiently, but require additional storage and maintenance when data changes. Transactions group operations into a single unit that either completes or is rolled back. Engineers measure late"
+  }
+]

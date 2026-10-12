@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#07111f">
+  <title>GLM CPU Lab</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="noise"></div>
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></div>
+      <div><strong>GLM CPU Lab</strong><small>محیط تست مدل روی سرور</small></div>
+    </div>
+    <div class="connection" id="connection"><i></i><span>در حال بررسی</span></div>
+  </header>
+
+  <main class="workspace">
+    <section class="chat-panel panel">
+      <div class="panel-head">
+        <div><p class="eyebrow">PLAYGROUND</p><h1>یک درخواست واقعی اجرا کن</h1></div>
+        <button class="ghost" id="clearBtn" type="button">پاک‌کردن گفتگو</button>
+      </div>
+
+      <div class="messages" id="messages" aria-live="polite">
+        <div class="empty-state" id="emptyState">
+          <div class="orb"><span></span></div>
+          <h2>آمادهٔ آزمایش است</h2>
+          <p>یک پرامپت بنویس؛ پاسخ و آمار دقیق اجرای سرور کنار هم ثبت می‌شوند.</p>
+          <div class="suggestions">
+            <button data-prompt="در ۵ بند معماری یک سامانهٔ RAG مقیاس‌پذیر را طراحی کن.">طراحی RAG</button>
+            <button data-prompt="این کد را از نظر همزمانی بررسی کن و گلوگاه‌ها را توضیح بده:\n\n```c\nfor (int i = tid; i < n; i += threads) out[i] = compute(in[i]);\n```">بررسی کد</button>
+            <button data-prompt="مفهوم attention را به فارسی و با یک مثال عددی ساده توضیح بده.">توضیح Attention</button>
+          </div>
+        </div>
+      </div>
+
+      <form class="composer" id="chatForm">
+        <textarea id="prompt" rows="3" placeholder="پیامت را بنویس…  Ctrl + Enter برای اجرا" required></textarea>
+        <div class="composer-foot">
+          <span id="tokenEstimate">حدود ۰ توکن ورودی</span>
+          <div>
+            <button class="stop hidden" id="stopBtn" type="button">توقف</button>
+            <button class="send" id="sendBtn" type="submit"><span>اجرا</span><b>↗</b></button>
+          </div>
+        </div>
+      </form>
+    </section>
+
+    <aside class="inspector">
+      <section class="panel metrics-panel">
+        <div class="section-title"><div><p class="eyebrow">LATEST RUN</p><h2>نتیجهٔ آخرین تست</h2></div><span class="run-id" id="runId">—</span></div>
+        <div class="metric-grid">
+          <article class="metric primary"><span>Prefill</span><strong id="prefillRate">—</strong><small>توکن / ثانیه</small></article>
+          <article class="metric"><span>Decode</span><strong id="decodeRate">—</strong><small>توکن / ثانیه</small></article>
+          <article class="metric"><span>Prompt</span><strong id="promptTokens">—</strong><small>توکن</small></article>
+          <article class="metric"><span>Output</span><strong id="outputTokens">—</strong><small>توکن</small></article>
+        </div>
+        <div class="timing-row"><span>زمان prefill <b id="prefillTime">—</b></span><span>زمان decode <b id="decodeTime">—</b></span><span>زمان کل <b id="totalTime">—</b></span></div>
+      </section>
+
+      <section class="panel settings-panel">
+        <div class="section-title"><div><p class="eyebrow">PARAMETERS</p><h2>تنظیمات اجرا</h2></div><button class="icon-btn" id="resetSettings" title="بازنشانی">↺</button></div>
+        <label class="field"><span>System prompt</span><textarea id="systemPrompt" rows="2" placeholder="اختیاری"></textarea></label>
+        <div class="control"><label for="temperature">Temperature</label><output id="temperatureValue">0.0</output><input id="temperature" type="range" min="0" max="2" step="0.1" value="0"></div>
+        <div class="control"><label for="maxTokens">حداکثر خروجی</label><output id="maxTokensValue">512</output><input id="maxTokens" type="range" min="32" max="2048" step="32" value="512"></div>
+        <div class="control"><label for="seed">Seed</label><input class="number" id="seed" type="number" value="42"></div>
+        <label class="switch-row"><span><b>Reasoning پایین</b><small>برای پاسخ سریع‌تر</small></span><input id="reasoning" type="checkbox" checked><i></i></label>
+      </section>
+
+      <section class="panel history-panel">
+        <div class="section-title"><div><p class="eyebrow">RUN HISTORY</p><h2>تست‌های این مرورگر</h2></div><button class="icon-btn" id="exportBtn" title="دریافت JSON">↓</button></div>
+        <div class="chart-wrap"><svg id="chart" viewBox="0 0 440 104" preserveAspectRatio="none" aria-label="نمودار سرعت تست‌ها"></svg></div>
+        <div class="history-list" id="historyList"><p class="muted">هنوز تستی ثبت نشده است.</p></div>
+      </section>
+
+      <details class="panel raw-panel">
+        <summary>پاسخ خام JSON <span>⌘</span></summary>
+        <pre id="rawJson">{}</pre>
+      </details>
+    </aside>
+  </main>
+  <div class="toast" id="toast" role="status"></div>
+  <script src="/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,55 @@
+{
+  "base_commit": "1a1d1abafa5cd3722c122dcacc8eca8867203d8b",
+  "source_patch_sha256": "4edf8aea7deb752242d46f940670d483accc865eea367182ca992b8ad7d61dd6",
+  "candidate_pid": 1114185,
+  "health": {
+    "8016": {
+      "status": "ok"
+    },
+    "8017": {
+      "status": "ok"
+    }
+  },
+  "results": [
+    {
+      "language": "English",
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 1860,
+        "prompt_ms": 9000.495,
+        "prompt_per_token_ms": 4.8389758064516135,
+        "prompt_per_second": 206.65530062513227,
+        "predicted_n": 366,
+        "predicted_ms": 20649.142,
+        "predicted_per_token_ms": 56.572991780821916,
+        "predicted_per_second": 17.67627923717121,
+        "draft_n": 208,
+        "draft_n_accepted": 158
+      },
+      "exact_complete_output": true
+    },
+    {
+      "language": "Persian",
+      "timings": {
+        "cache_n": 0,
+        "prompt_n": 4397,
+        "prompt_ms": 21339.23,
+        "prompt_per_token_ms": 4.853133954969297,
+        "prompt_per_second": 206.05242082305688,
+        "predicted_n": 339,
+        "predicted_ms": 19305.98,
+        "predicted_per_token_ms": 57.118284023668636,
+        "predicted_per_second": 17.50752875533902,
+        "draft_n": 191,
+        "draft_n_accepted": 148
+      },
+      "exact_complete_output": true
+    }
+  ],
+  "target_400_achieved": false,
+  "tests": {
+    "qkv": 384,
+    "moe": 72,
+    "moe_large": 12
+  }
+}

@@ -1,0 +1,500 @@
+--- a/ggml/src/ggml-cpu/amx/amx.cpp
++++ b/ggml/src/ggml-cpu/amx/amx.cpp
+@@ -27,6 +27,10 @@
+     }
+ 
+     bool compute_forward(struct ggml_compute_params * params, struct ggml_tensor * op) override {
++        if (op->op == GGML_OP_MUL_MAT_ID) {
++            ggml_backend_amx_mul_mat_id(params, op);
++            return true;
++        }
+         if (op->op == GGML_OP_MUL_MAT) {
+             ggml_backend_amx_mul_mat(params, op);
+             return true;
+@@ -143,22 +147,32 @@
+ namespace ggml::cpu::amx {
+ class extra_buffer_type : ggml::cpu::extra_buffer_type {
+     bool supports_op(ggml_backend_dev_t, const struct ggml_tensor * op) override {
+-        if (op->op != GGML_OP_MUL_MAT) {
++        const bool moe = op->op == GGML_OP_MUL_MAT_ID;
++        if (op->op != GGML_OP_MUL_MAT && !moe) {
++            return false;
++        }
++        if (moe && !getenv("GGML_AMX_MOE")) {
+             return false;
+         }
+         auto * src0 = op->src[0];
+         auto * src1 = op->src[1];
+ 
+-        if (!ggml_is_contiguous(src0) || !ggml_is_contiguous(src1)) {
++        if (!ggml_is_contiguous(src0) || src1->nb[0] != sizeof(float) ||
++            (src0->type == GGML_TYPE_F16 && !ggml_is_contiguous(src1))) {
+             return false;
+         }
+         if (!src0->buffer || src0->buffer->buft != ggml_backend_amx_buffer_type()) {
+             return false;
+         }
+-        if (src1->buffer && !ggml_backend_buft_is_host(src1->buffer->buft)) {
++        if (src1->buffer && !ggml_backend_buft_is_host(src1->buffer->buft) &&
++            src1->buffer->buft != ggml_backend_amx_buffer_type()) {
+             return false;
+         }
+         if (op->ne[0] % (TILE_N * 2)) {
++            return false;
++        }
++        if (moe && (!qtype_has_amx_kernels(src0->type) || src1->ne[3] != 1 ||
++                    (src1->ne[1] != 1 && src1->ne[1] != op->src[2]->ne[0]))) {
+             return false;
+         }
+         int alignment;
+@@ -174,9 +188,6 @@
+             case GGML_TYPE_IQ4_XS:
+                 alignment = 256; // QK_K
+                 break;
+-            case GGML_TYPE_F16:
+-                alignment = 16;
+-                break;
+             default:
+                 return false;
+         }
+@@ -190,8 +201,7 @@
+     }
+ 
+     ggml::cpu::tensor_traits * get_tensor_traits(const struct ggml_tensor * op) override {
+-        if (op->op == GGML_OP_MUL_MAT && op->src[0]->buffer &&
+-            op->src[0]->buffer->buft == ggml_backend_amx_buffer_type()) {
++        if (supports_op(nullptr, op)) {
+             return (ggml::cpu::tensor_traits *) op->src[0]->extra;
+         }
+ 
+--- a/ggml/src/ggml-cpu/amx/mmq.cpp
++++ b/ggml/src/ggml-cpu/amx/mmq.cpp
+@@ -16,6 +16,8 @@
+ #if defined(__gnu_linux__)
+ #include <sys/syscall.h>
+ #include <unistd.h>
++#include <linux/mempolicy.h>
++#include <cerrno>
+ #endif
+ 
+ #if (defined(_WIN32) || defined(_WIN64))
+@@ -1334,9 +1336,9 @@
+ 
+ #define LAUNCH_TINYGEMM_KERNEL_AVX(MB_SIZE, NB_SIZE)                                \
+     tinygemm_kernel_avx<float, type, float, MB_SIZE, NB_SIZE, blck_size>::apply(    \
+-        K, (const float *)src1->data + src1_offset + mb_start * K,                  \
+-        (const type *)src0->data + src0_offset + nb_start * K,                      \
+-        (float *)dst->data + dst_offset + mb_start * ldc + nb_start, ldc)
++        K, (const float *)((const char *)src1->data + src1_offset) + mb_start * K,                  \
++        (const type *)((const char *)src0->data + src0_offset) + nb_start * K,                      \
++        (float *)((char *)dst->data + dst_offset) + mb_start * ldc + nb_start, ldc)
+ 
+ 
+ // re-organize in the format {NB, KB, TILE_SIZE}:
+@@ -1987,7 +1989,7 @@
+     tinygemm_kernel_vnni<vec_dot_type, type, float, 1, NB_SIZE, blck_size>::apply(             \
+         KB, wdata_batch,                                                                       \
+         (const char *)src0->data + src0_offset + PACKED_INDEX(nb * kTilesN, 0, KB, TILE_SIZE), \
+-        (float *) dst->data + dst_offset + nb_start, ldc)
++        (float *) ((char *) dst->data + dst_offset) + nb_start, ldc)
+ 
+ template <typename TA, typename TB, typename TC, int BLOCK_K,
+           typename std::enable_if<!is_type_qkk<TB>::value, int>::type = 0>
+@@ -2275,7 +2277,7 @@
+         GGML_DISPATCH_QTYPES(TYPE, [&] {
+             row_size_B = get_row_size<type, blck_size>(K);
+         });
+-        return N * row_size_B;
++        return N * row_size_B * tensor->ne[2] * tensor->ne[3];
+     };
+ 
+     if (qtype_has_amx_kernels(TYPE)) {
+@@ -2296,7 +2298,28 @@
+     const int N = tensor->ne[1]; // ne1: out_features
+ 
+     GGML_DISPATCH_QTYPES(TYPE, [&] {
+-        convert_B_packed_format<type, blck_size>((void *)((char *)tensor->data + offset), (const type *)data, N, K);
++        GGML_ASSERT(ggml_is_contiguous(tensor));
++#if defined(__gnu_linux__)
++        if ((getenv("GGML_AMX_NUMA_ROWS") && tensor->ne[2] > 1 && tensor->ne[3] == 1 && N % 64 == 0) ||
++            (getenv("GGML_AMX_NUMA_DENSE") && N % 128 == 0)) {
++            const size_t half_bytes = (N / 2) * get_row_size<type, blck_size>(K);
++            const uintptr_t page = (uintptr_t) sysconf(_SC_PAGESIZE);
++            for (int64_t e = 0; e < tensor->ne[2] * tensor->ne[3]; ++e) {
++                for (int node = 0; node < 2; ++node) {
++                    const uintptr_t begin = (uintptr_t) tensor->data + (2 * e + node) * half_bytes;
++                    const uintptr_t lo = (begin + page - 1) & ~(page - 1);
++                    const uintptr_t hi = (begin + half_bytes) & ~(page - 1);
++                    unsigned long mask = 1UL << node;
++                    if (hi > lo && syscall(SYS_mbind, (void *) lo, hi - lo, MPOL_BIND, &mask,
++                                           sizeof(mask) * 8, 0) != 0) {
++                        fprintf(stderr, "AMX row mbind failed: %s\n", strerror(errno));
++                    }
++                }
++            }
++        }
++#endif
++        convert_B_packed_format<type, blck_size>(tensor->data, (const type *) data,
++            N * tensor->ne[2] * tensor->ne[3], K);
+     });
+ }
+ 
+@@ -2315,6 +2338,17 @@
+     const bool is_floating_type = TYPE == GGML_TYPE_F16;
+     if (is_floating_type) {
+         return 0;
++    }
++
++    if (dst->op == GGML_OP_MUL_MAT_ID) {
++        const int64_t rows = dst->src[2]->ne[0] * dst->src[2]->ne[1];
++        const int64_t experts = src0->ne[2];
++        const size_t meta = GGML_PAD((3 * experts + 2 + rows) * sizeof(int32_t), 64);
++        size_t row_bytes = 0;
++        GGML_DISPATCH_QTYPES(TYPE, [&] {
++            row_bytes = src0->ne[0] / blck_size * sizeof(vec_dot_type);
++        });
++        return meta + rows * row_bytes;
+     }
+ 
+     const int M = dst->ne[1];
+@@ -2371,7 +2405,9 @@
+                     int mb = remaining / NB;
+                     int nb = remaining % NB;
+ 
+-                    int64_t src0_offset = ggml_batch_offset(src0, batch_idx, ne2);
++                    int64_t src0_batch = (batch_idx % ne2) / (ne2 / src0->ne[2]) +
++                        (batch_idx / ne2) / (dst->ne[3] / src0->ne[3]) * src0->ne[2];
++                    int64_t src0_offset = ggml_batch_offset(src0, src0_batch, src0->ne[2]);
+                     int64_t src1_offset = ggml_batch_offset(src1, batch_idx, ne2);
+                     int64_t dst_offset  = ggml_batch_offset(dst,  batch_idx, ne2);
+ 
+@@ -2424,7 +2460,8 @@
+                     int64_t src1_offset = ggml_batch_offset(src1, batch_idx, ne2);
+                     const float * A_data = (const float *)((const char *)src1->data + src1_offset);
+                     char * wdata_batch = (char *)wdata + batch_idx * M * row_size_A;
+-                    from_float<vec_dot_type>(A_data + m * K, wdata_batch + m * row_size_A, K);
++                    from_float<vec_dot_type>((const float *) ((const char *) A_data + m * src1->nb[1]),
++                        wdata_batch + m * row_size_A, K);
+                 }
+             });
+         });
+@@ -2432,24 +2469,36 @@
+ 
+     ggml_barrier(params->threadpool);
+ 
+-    if (M == 1) {
++    const char * small_dense_env = getenv("GGML_AMX_DENSE_SMALL");
++    const int small_dense_max = small_dense_env ? atoi(small_dense_env) : 1;
++    if (M <= small_dense_max) {
+         // MB = 1 and handle 8 tiles in each block
+         constexpr int kTilesN = 4;
+         constexpr int BLOCK_N = TILE_N * kTilesN;
+         const int NB = div_up(N, BLOCK_N);
+-
+-        parallel_for_ggml(params, n_batch * NB, [&](int begin, int end) {
++        const bool numa_rows = getenv("GGML_AMX_NUMA_DENSE") && N % (2 * BLOCK_N) == 0 && params->nth > 1;
++        const int node = numa_rows ? params->ith % 2 : 0;
++        const int work_nb = numa_rows ? NB / 2 : NB;
++        ggml_compute_params local_params = *params;
++        if (numa_rows) {
++            local_params.ith = params->ith / 2;
++            local_params.nth = (params->nth + 1 - node) / 2;
++        }
++        parallel_for_ggml(&local_params, n_batch * M * work_nb, [&](int begin, int end) {
+             GGML_DISPATCH_QTYPES(TYPE, [&] {
+                 const int KB = K / blck_size;
+                 const int TILE_SIZE = get_tile_size<type>();
+                 const int row_size_A = KB * sizeof(vec_dot_type);
+                 for (int i = begin; i < end; ++i) {
+-                    int batch_idx = i / NB;
+-                    int nb = i % NB;
+-
+-                    int64_t src0_offset = ggml_batch_offset(src0, batch_idx, ne2);
+-                    int64_t dst_offset  = ggml_batch_offset(dst,  batch_idx, ne2);
+-                    const char * wdata_batch = (const char *)wdata + batch_idx * row_size_A;
++                    int batch_idx = i / (M * work_nb);
++                    int m = (i / work_nb) % M;
++                    int nb = i % work_nb + node * work_nb;
++
++                    int64_t src0_batch = (batch_idx % ne2) / (ne2 / src0->ne[2]) +
++                        (batch_idx / ne2) / (dst->ne[3] / src0->ne[3]) * src0->ne[2];
++                    int64_t src0_offset = src0_batch * N * get_row_size<type, blck_size>(K);
++                    int64_t dst_offset  = ggml_batch_offset(dst, batch_idx, ne2) + m * dst->nb[1];
++                    const char * wdata_batch = (const char *)wdata + (batch_idx * M + m) * row_size_A;
+ 
+                     int nb_start = nb * BLOCK_N;
+                     int nb_size = std::min(BLOCK_N, N - nb_start); // 32, 64, 96
+@@ -2474,7 +2523,15 @@
+     const int MB = div_up(M, BLOCK_M);
+     const int NB = div_up(N, BLOCK_N);
+ 
+-    parallel_for_ggml(params, n_batch * MB * NB, [&](int begin, int end) {
++    const bool numa_rows = getenv("GGML_AMX_NUMA_DENSE") && N % 128 == 0 && params->nth > 1;
++    const int node = numa_rows ? params->ith % 2 : 0;
++    const int work_nb = numa_rows ? NB / 2 : NB;
++    ggml_compute_params local_params = *params;
++    if (numa_rows) {
++        local_params.ith = params->ith / 2;
++        local_params.nth = (params->nth + 1 - node) / 2;
++    }
++    parallel_for_ggml(&local_params, n_batch * MB * work_nb, [&](int begin, int end) {
+         // init tile config for each thread
+         ggml_tile_config_init();
+ 
+@@ -2484,12 +2541,14 @@
+             const int row_size_A = KB * sizeof(vec_dot_type);
+ 
+             for (int i = begin; i < end; ++i) {
+-                int batch_idx = i / (MB * NB);
+-                int remaining = i % (MB * NB);
+-                int mb = remaining / NB;
+-                int nb = remaining % NB;
+-
+-                int64_t src0_offset = ggml_batch_offset(src0, batch_idx, ne2);
++                int batch_idx = i / (MB * work_nb);
++                int remaining = i % (MB * work_nb);
++                int mb = remaining / work_nb;
++                int nb = remaining % work_nb + node * work_nb;
++
++                int64_t src0_batch = (batch_idx % ne2) / (ne2 / src0->ne[2]) +
++                        (batch_idx / ne2) / (dst->ne[3] / src0->ne[3]) * src0->ne[2];
++                    int64_t src0_offset = src0_batch * N * get_row_size<type, blck_size>(K);
+                 int64_t dst_offset  = ggml_batch_offset(dst,  batch_idx, ne2);
+                 const char * wdata_batch = (const char *)wdata + batch_idx * M * row_size_A;
+ 
+@@ -2502,10 +2561,97 @@
+                     mb_size, nb_size, KB,
+                     wdata_batch + mb_start * row_size_A,
+                     (const char *)src0->data + src0_offset + PACKED_INDEX(nb * 2, 0, KB, TILE_SIZE),
+-                    (float *) dst->data + dst_offset + mb_start * N + nb_start, ldc);
++                    (float *) ((char *) dst->data + dst_offset) + mb_start * N + nb_start, ldc);
+             }
+         });
+     });
+ }
+ 
++
++// Use the existing packed kernels for each expert's selected token rows.
++void ggml_backend_amx_mul_mat_id(const ggml_compute_params * params, ggml_tensor * dst) {
++    const ggml_tensor * w = dst->src[0];
++    const ggml_tensor * x = dst->src[1];
++    const ggml_tensor * ids = dst->src[2];
++    const int K = w->ne[0], N = w->ne[1], E = w->ne[2];
++    const int S = ids->ne[0], T = ids->ne[1], R = S * T;
++    const int TYPE = w->type;
++    constexpr int BM = 32, BN = 32;
++    const int NB = N / BN;
++    const bool local_rows = getenv("GGML_AMX_NUMA_ROWS") && N % 64 == 0 && params->nth > 1;
++    const int work_nb = local_rows ? NB / 2 : NB;
++    int32_t * counts = (int32_t *) params->wdata;
++    int32_t * starts = counts + E;
++    int32_t * tasks = starts + E + 1;
++    int32_t * rows = tasks + E + 1;
++    const size_t meta = GGML_PAD((3 * E + 2 + R) * sizeof(int32_t), 64);
++    char * qa = (char *) params->wdata + meta;
++    if (params->ith == 0) {
++        std::fill(counts, counts + E, 0);
++        for (int t = 0; t < T; ++t) {
++            for (int j = 0; j < S; ++j) {
++                int e = *(int32_t *) ((char *) ids->data + t * ids->nb[1] + j * ids->nb[0]);
++                GGML_ASSERT(e >= 0 && e < E);
++                ++counts[e];
++            }
++        }
++        starts[0] = tasks[0] = 0;
++        for (int e = 0; e < E; ++e) {
++            starts[e + 1] = starts[e] + counts[e];
++            tasks[e + 1] = tasks[e] + div_up(counts[e], BM) * work_nb;
++            counts[e] = 0;
++        }
++        for (int t = 0; t < T; ++t) {
++            for (int j = 0; j < S; ++j) {
++                int e = *(int32_t *) ((char *) ids->data + t * ids->nb[1] + j * ids->nb[0]);
++                rows[starts[e] + counts[e]++] = t * S + j;
++            }
++        }
++    }
++    ggml_barrier(params->threadpool);
++    GGML_DISPATCH_QTYPES(TYPE, [&] {
++        const int KB = K / blck_size;
++        const size_t row_bytes = KB * sizeof(vec_dot_type);
++        const size_t expert_bytes = N * get_row_size<type, blck_size>(K);
++        const int tile_bytes = get_tile_size<type>();
++        GGML_ASSERT(params->wsize >= meta + R * row_bytes);
++        for (int r = params->ith; r < R; r += params->nth) {
++            int t = rows[r] / S, j = rows[r] % S;
++            const float * xr = (const float *) ((const char *) x->data + t * x->nb[2] + (j % x->ne[1]) * x->nb[1]);
++            from_float<vec_dot_type>(xr, qa + r * row_bytes, K);
++        }
++        ggml_barrier(params->threadpool);
++        ggml_tile_config_init();
++        alignas(64) float result[BM * BN];
++        const int node = local_rows ? params->ith % 2 : 0;
++        const int rank = local_rows ? params->ith / 2 : params->ith;
++        const int workers = local_rows ? (params->nth + 1 - node) / 2 : params->nth;
++        const int begin = (int64_t) tasks[E] * rank / workers;
++        const int end = (int64_t) tasks[E] * (rank + 1) / workers;
++        for (int job = begin; job < end; ++job) {
++            int e = std::upper_bound(tasks, tasks + E + 1, job) - tasks - 1;
++            int local = job - tasks[e];
++            int mb = local / work_nb, nb = local % work_nb + node * work_nb;
++            int nr = std::min(BM, counts[e] - mb * BM);
++            const char * ap = qa + (starts[e] + mb * BM) * row_bytes;
++            const char * bp = (const char *) w->data + e * expert_bytes + PACKED_INDEX(nb * 2, 0, KB, tile_bytes);
++            const char * small_env = getenv("GGML_AMX_MOE_SMALL");
++            const int small_max = small_env ? atoi(small_env) : 1;
++            if (nr <= small_max) {
++                for (int m = 0; m < nr; ++m) {
++                    tinygemm_kernel_vnni<vec_dot_type, type, float, 1, BN, blck_size>::apply(
++                        KB, ap + m * row_bytes, bp, result + m * BN, BN);
++                }
++            } else {
++                tinygemm_kernel_amx<vec_dot_type, type, float, blck_size>(nr, BN, KB, ap, bp, result, BN);
++            }
++            for (int m = 0; m < nr; ++m) {
++                int r = rows[starts[e] + mb * BM + m];
++                char * yp = (char *) dst->data + (r / S) * dst->nb[2] + (r % S) * dst->nb[1] + nb * BN * sizeof(float);
++                memcpy(yp, result + m * BN, BN * sizeof(float));
++            }
++        }
++    });
++}
++
+ #endif // if defined(__AMX_INT8__) && defined(__AVX512VNNI__)
+--- a/ggml/src/ggml-cpu/amx/mmq.h
++++ b/ggml/src/ggml-cpu/amx/mmq.h
+@@ -8,3 +8,5 @@
+ void ggml_backend_amx_convert_weight(struct ggml_tensor * tensor, const void * data, size_t offset, size_t size);
+ 
+ void ggml_backend_amx_mul_mat(const struct ggml_compute_params * params, struct ggml_tensor * dst);
++
++void ggml_backend_amx_mul_mat_id(const struct ggml_compute_params * params, struct ggml_tensor * dst);
+--- a/ggml/src/ggml-cpu/ggml-cpu.cpp
++++ b/ggml/src/ggml-cpu/ggml-cpu.cpp
+@@ -438,9 +438,10 @@
+             if (buf_extra->supports_op(dev, op)) {
+                 return true;
+             }
+-            // LOCAL PATCH: generic CPU MUL_MAT reads plain host pointers, so it
+-            // works even when a source sits in an extra (GLM pool-key) buffer.
+-            if (op->op == GGML_OP_MUL_MAT && src1->type == GGML_TYPE_F32) {
++            // Floating tensors retain their layout in the AMX buffer.
++            if (op->op == GGML_OP_MUL_MAT && src1->type == GGML_TYPE_F32 &&
++                (src0->type == GGML_TYPE_F32 || src0->type == GGML_TYPE_F16 || src0->type == GGML_TYPE_BF16 ||
++                 !src0->buffer || !ggml_backend_cpu_is_extra_buffer_type(src0->buffer->buft))) {
+                 return true;
+             }
+             return false;
+--- a/ggml/src/ggml-cpu/ggml-cpu.c
++++ b/ggml/src/ggml-cpu/ggml-cpu.c
+@@ -477,6 +477,12 @@
+ 
+ #endif
+ 
++static _Thread_local int ggml_barrier_rank;
++struct ggml_local_barrier {
++    atomic_int GGML_CACHE_ALIGN count;
++    atomic_int GGML_CACHE_ALIGN generation;
++};
++
+ // Threadpool def
+ struct ggml_threadpool {
+     ggml_mutex_t mutex;       // mutex for cond.var
+@@ -489,6 +495,8 @@
+     atomic_int n_graph;       // updated when there is work to be done (i.e each graph) holds graph and active thread counts.
+     atomic_int GGML_CACHE_ALIGN n_barrier;
+     atomic_int GGML_CACHE_ALIGN n_barrier_passed;
++    struct ggml_local_barrier local_barrier[2];
++    bool tree_barrier;
+     atomic_int GGML_CACHE_ALIGN current_chunk; // currently processing chunk during Mat_Mul, shared between all the threads.
+ 
+     // these are atomic as an annotation for thread-sanitizer
+@@ -582,6 +590,31 @@
+ #ifdef GGML_USE_OPENMP
+     #pragma omp barrier
+ #else
++    if (tp->tree_barrier) {
++        const int group = ggml_barrier_rank & 1;
++        struct ggml_local_barrier * lb = &tp->local_barrier[group];
++        const int members = (n_threads + 1 - group) / 2;
++        const int generation = atomic_load_explicit(&lb->generation, memory_order_relaxed);
++        if (atomic_fetch_add_explicit(&lb->count, 1, memory_order_acq_rel) == members - 1) {
++            atomic_store_explicit(&lb->count, 0, memory_order_relaxed);
++            const int global_gen = atomic_load_explicit(&tp->n_barrier_passed, memory_order_relaxed);
++            if (atomic_fetch_add_explicit(&tp->n_barrier, 1, memory_order_acq_rel) == 1) {
++                atomic_store_explicit(&tp->n_barrier, 0, memory_order_relaxed);
++                atomic_fetch_add_explicit(&tp->n_barrier_passed, 1, memory_order_release);
++            } else {
++                while (atomic_load_explicit(&tp->n_barrier_passed, memory_order_acquire) == global_gen) {
++                    ggml_thread_cpu_relax();
++                }
++            }
++            atomic_fetch_add_explicit(&lb->generation, 1, memory_order_release);
++        } else {
++            while (atomic_load_explicit(&lb->generation, memory_order_acquire) == generation) {
++                ggml_thread_cpu_relax();
++            }
++        }
++        return;
++    }
++
+     int n_passed = atomic_load_explicit(&tp->n_barrier_passed, memory_order_relaxed);
+ 
+     // enter barrier (full seq-cst fence)
+@@ -2207,8 +2240,14 @@
+ 
+     cpu_set_t * cpus = CPU_ALLOC(g_state.numa.total_cpus);
+     CPU_ZERO_S(setsize, cpus);
+-    for (size_t i = 0; i < node->n_cpus; ++i) {
+-        CPU_SET_S(node->cpus[i], setsize, cpus);
++    if (getenv("GGML_NUMA_PIN")) {
++        const size_t rank = g_state.numa.numa_strategy == GGML_NUMA_STRATEGY_DISTRIBUTE
++            ? (size_t) thread_n / g_state.numa.n_nodes : (size_t) thread_n;
++        CPU_SET_S(node->cpus[rank % node->n_cpus], setsize, cpus);
++    } else {
++        for (size_t i = 0; i < node->n_cpus; ++i) {
++            CPU_SET_S(node->cpus[i], setsize, cpus);
++        }
+     }
+ 
+     rv = pthread_setaffinity_np(pthread_self(), setsize, cpus);
+@@ -3104,8 +3143,15 @@
+ }
+ 
+ static thread_ret_t ggml_graph_compute_thread(void * data) {
++#if defined(__SSE__)
++    if (getenv("GGML_CPU_FTZ")) {
++        _mm_setcsr(_mm_getcsr() | 0x8040);
++    }
++#endif
++
+     struct ggml_compute_state * state = (struct ggml_compute_state *) data;
+     struct ggml_threadpool    * tp    = state->threadpool;
++    ggml_barrier_rank = state->ith;
+ 
+     const struct ggml_cgraph * cgraph = tp->cgraph;
+     const struct ggml_cplan  * cplan  = tp->cplan;
+@@ -3327,6 +3373,11 @@
+         threadpool->cgraph           = cgraph;
+         threadpool->cplan            = cplan;
+         threadpool->n_graph          = 0;
++        threadpool->tree_barrier = getenv("GGML_TREE_BARRIER") != NULL;
++        for (int group = 0; group < 2; ++group) {
++            atomic_init(&threadpool->local_barrier[group].count, 0);
++            atomic_init(&threadpool->local_barrier[group].generation, 0);
++        }
+         threadpool->n_barrier        = 0;
+         threadpool->n_barrier_passed = 0;
+         threadpool->current_chunk    = 0;
+--- a/tools/llama-bench/llama-bench.cpp
++++ b/tools/llama-bench/llama-bench.cpp
+@@ -1326,7 +1326,8 @@
+     llama_context_params to_llama_cparams() const {
+         llama_context_params cparams = llama_context_default_params();
+ 
+-        cparams.n_ctx           = n_prompt + n_gen + n_depth;
++        cparams.n_seq_max       = 4;
++        cparams.n_ctx           = std::max(4096, 4 * (n_prompt + n_gen + n_depth));
+         cparams.n_batch         = n_batch;
+         cparams.n_ubatch        = n_ubatch;
+         cparams.type_k          = type_k;
