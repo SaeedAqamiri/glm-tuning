@@ -1,6 +1,6 @@
 const $ = (id) => document.getElementById(id);
-const state = { history: JSON.parse(localStorage.getItem('glm-history') || '[]'), controller: null };
-const defaults = { temperature: 0, maxTokens: 512, seed: 42, reasoning: true, systemPrompt: '' };
+const state = { history: JSON.parse(localStorage.getItem('glm-history') || '[]'), controller: null, conversation: [] };
+const defaults = { temperature: 0, maxTokens: 512, seed: 42, reasoning: true, systemPrompt: '', memory: true };
 
 function esc(text='') { return text.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c])); }
 function formatContent(text='') {
@@ -65,9 +65,9 @@ function createAssistantBubble() {
   return view;
 }
 
-function readSettings() { return { temperature:+$('temperature').value, maxTokens:+$('maxTokens').value, seed:+$('seed').value, reasoning:$('reasoning').checked, systemPrompt:$('systemPrompt').value.trim() }; }
+function readSettings() { return { temperature:+$('temperature').value, maxTokens:+$('maxTokens').value, seed:+$('seed').value, reasoning:$('reasoning').checked, systemPrompt:$('systemPrompt').value.trim(), memory:$('memory').checked }; }
 function saveSettings() { localStorage.setItem('glm-settings',JSON.stringify(readSettings())); }
-function applySettings(settings={}) { const s={...defaults,...settings}; for(const key of ['temperature','maxTokens','seed','systemPrompt']) $(key).value=s[key]; $('reasoning').checked=s.reasoning; $('temperatureValue').textContent=(+s.temperature).toFixed(1); $('maxTokensValue').textContent=s.maxTokens; }
+function applySettings(settings={}) { const s={...defaults,...settings}; for(const key of ['temperature','maxTokens','seed','systemPrompt']) $(key).value=s[key]; $('reasoning').checked=s.reasoning; $('memory').checked=s.memory; $('temperatureValue').textContent=(+s.temperature).toFixed(1); $('maxTokensValue').textContent=s.maxTokens; }
 
 function updateMetrics(run) {
   const t=run?.timings||{}; const usage=run?.usage||{};
@@ -76,6 +76,7 @@ function updateMetrics(run) {
   $('prefillTime').textContent=seconds(t.prompt_ms); $('decodeTime').textContent=seconds(t.predicted_ms); $('totalTime').textContent=seconds(run?.client_ms);
   const draft=t.draft_n||0;
   $('mtpRate').textContent=draft?`${Math.round(100*(t.draft_n_accepted||0)/draft)}٪`:'—';
+  $('cacheTokens').textContent=(t.cache_n!==undefined&&t.cache_n!==null)?t.cache_n:'—';
   $('runId').textContent=run ? `#${String(run.id).padStart(3,'0')}` : '—';
   $('rawJson').textContent=JSON.stringify({timings:t,usage},null,2);
 }
@@ -94,8 +95,10 @@ async function runPrompt(event) {
   const settings=readSettings(); saveSettings(); addMessage('user',prompt);
   const view=createAssistantBubble();
   state.controller=new AbortController(); $('sendBtn').disabled=true; $('stopBtn').classList.remove('hidden'); const started=performance.now();
-  const messages=[]; if(settings.systemPrompt) messages.push({role:'system',content:settings.systemPrompt}); messages.push({role:'user',content:prompt});
-  const body={messages,max_tokens:settings.maxTokens,temperature:settings.temperature,seed:settings.seed,cache_prompt:false,stream:true};
+  const messages=[]; if(settings.systemPrompt) messages.push({role:'system',content:settings.systemPrompt});
+  if(settings.memory) for(const m of state.conversation) messages.push(m);
+  messages.push({role:'user',content:prompt});
+  const body={messages,max_tokens:settings.maxTokens,temperature:settings.temperature,seed:settings.seed,cache_prompt:settings.memory,stream:true};
   if(settings.reasoning) body.chat_template_kwargs={reasoning_effort:'low'};
   let timings=null, usage=null, aborted=false, failed=null;
   try {
@@ -130,6 +133,7 @@ async function runPrompt(event) {
     toast(failed,true);
   } else {
     if(!view.content&&!view.reasoning) view.contentEl.innerHTML='<span class="muted">پاسخ متنی خالی بود.</span>';
+    if(settings.memory){ state.conversation.push({role:'user',content:prompt}); state.conversation.push({role:'assistant',content:view.content||''}); }
     const estPerSecond=view.ntok>1?view.ntok/((client_ms-(timings?.prompt_ms||0))/1000):undefined;
     const run={id:Date.now()%1000,prompt:prompt.slice(0,160),content:view.content,reasoning:view.reasoning,settings,
       timings:timings||{predicted_n:view.ntok,predicted_ms:client_ms,predicted_per_second:estPerSecond},
@@ -145,9 +149,9 @@ function updateEstimate(){ $('tokenEstimate').textContent=`حدود ${estimateTo
 function exportHistory(){ const blob=new Blob([JSON.stringify(state.history,null,2)],{type:'application/json'}); const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`glm-tests-${new Date().toISOString().slice(0,10)}.json`;a.click();URL.revokeObjectURL(a.href); }
 
 $('chatForm').addEventListener('submit',runPrompt); $('stopBtn').onclick=()=>state.controller?.abort(); $('prompt').addEventListener('input',updateEstimate); $('prompt').addEventListener('keydown',e=>{if(e.ctrlKey&&e.key==='Enter')runPrompt(e)});
-$('clearBtn').onclick=()=>{ $('messages').innerHTML='<div class="empty-state" id="emptyState"><div class="orb"><span></span></div><h2>گفتگو پاک شد</h2><p>برای اجرای تست بعدی، یک پرامپت جدید بنویس.</p></div>'; };
+$('clearBtn').onclick=()=>{ state.conversation=[]; $('messages').innerHTML='<div class="empty-state" id="emptyState"><div class="orb"><span></span></div><h2>گفتگوی جدید</h2><p>حافظهٔ کش پاک شد؛ پیام بعدی از صفر prefill می‌شود.</p></div>'; };
 $('exportBtn').onclick=exportHistory; $('resetSettings').onclick=()=>{applySettings(defaults);saveSettings();toast('تنظیمات بازنشانی شد')};
 for(const id of ['temperature','maxTokens']) $(id).addEventListener('input',()=>{ $(id+'Value').textContent=id==='temperature'?(+$(id).value).toFixed(1):$(id).value; saveSettings(); });
-for(const id of ['seed','reasoning','systemPrompt']) $(id).addEventListener('change',saveSettings);
+for(const id of ['seed','reasoning','memory','systemPrompt']) $(id).addEventListener('change',saveSettings);
 document.querySelectorAll('[data-prompt]').forEach(b=>b.onclick=()=>{$('prompt').value=b.dataset.prompt;updateEstimate();$('prompt').focus()});
 applySettings(JSON.parse(localStorage.getItem('glm-settings')||'{}')); updateEstimate(); renderHistory(); if(state.history[0])updateMetrics(state.history[0]); checkHealth(); loadModelTag(); setInterval(checkHealth,15000);

@@ -24,7 +24,7 @@
     <section class="chat-panel panel">
       <div class="panel-head">
         <div><p class="eyebrow">PLAYGROUND</p><h1>یک درخواست واقعی اجرا کن</h1></div>
-        <button class="ghost" id="clearBtn" type="button">پاک‌کردن گفتگو</button>
+        <button class="ghost" id="clearBtn" type="button">گفتگوی جدید</button>
       </div>
 
       <div class="messages" id="messages" aria-live="polite">
@@ -61,6 +61,7 @@
           <article class="metric"><span>Prompt</span><strong id="promptTokens">—</strong><small>توکن</small></article>
           <article class="metric"><span>Output</span><strong id="outputTokens">—</strong><small>توکن</small></article>
           <article class="metric"><span>MTP</span><strong id="mtpRate">—</strong><small>نرخ پذیرش پیش‌نویس</small></article>
+          <article class="metric"><span>Cache</span><strong id="cacheTokens">—</strong><small>توکن کش‌شده</small></article>
         </div>
         <div class="timing-row"><span>زمان prefill <b id="prefillTime">—</b></span><span>زمان decode <b id="decodeTime">—</b></span><span>زمان کل <b id="totalTime">—</b></span></div>
       </section>
@@ -71,6 +72,7 @@
         <div class="control"><label for="temperature">Temperature</label><output id="temperatureValue">0.0</output><input id="temperature" type="range" min="0" max="2" step="0.1" value="0"></div>
         <div class="control"><label for="maxTokens">حداکثر خروجی</label><output id="maxTokensValue">512</output><input id="maxTokens" type="range" min="32" max="2048" step="32" value="512"></div>
         <div class="control"><label for="seed">Seed</label><input class="number" id="seed" type="number" value="42"></div>
+        <label class="switch-row"><span><b>حافظهٔ گفتگو</b><small>ادامهٔ مکالمه با cache پرامپت</small></span><input id="memory" type="checkbox" checked><i></i></label>
         <label class="switch-row"><span><b>Reasoning پایین</b><small>برای پاسخ سریع‌تر</small></span><input id="reasoning" type="checkbox" checked><i></i></label>
       </section>
 
