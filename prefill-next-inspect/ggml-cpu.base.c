@@ -3233,6 +3233,57 @@ static int ggml_cpu_try_fuse_ops(
     return 0;
 }
 
+static _Thread_local int64_t * ggml_node_profile_times;
+static _Thread_local int64_t * ggml_node_profile_compute;
+static _Thread_local int ggml_node_profile_nodes;
+
+static bool ggml_node_profile_prepare(const struct ggml_cgraph * graph) {
+    if (!getenv("GGML_NODE_PROFILE")) { return false; }
+    bool prefill = false;
+    for (int i = 0; i < graph->n_nodes; ++i) {
+        const struct ggml_tensor * n = graph->nodes[i];
+        if (n->op == GGML_OP_GET_ROWS && n->src[0] && strstr(n->src[0]->name, "token_embd")) {
+            prefill = n->ne[1] > 8;
+            break;
+        }
+    }
+    if (!prefill) { return false; }
+    if (ggml_node_profile_nodes != graph->n_nodes) {
+        free(ggml_node_profile_times);
+        free(ggml_node_profile_compute);
+        ggml_node_profile_times = calloc(graph->n_nodes, sizeof(int64_t));
+        ggml_node_profile_compute = calloc(graph->n_nodes, sizeof(int64_t));
+        ggml_node_profile_nodes = graph->n_nodes;
+    }
+    return ggml_node_profile_times && ggml_node_profile_compute;
+}
+
+static void ggml_node_profile_report(const struct ggml_cgraph * graph) {
+    int64_t wall[GGML_OP_COUNT] = {0}, compute[GGML_OP_COUNT] = {0}, total = 0;
+    for (int i = 0; i < graph->n_nodes; ++i) {
+        const enum ggml_op op = graph->nodes[i]->op;
+        wall[op] += ggml_node_profile_times[i];
+        compute[op] += ggml_node_profile_compute[i];
+        total += ggml_node_profile_times[i];
+    }
+    fprintf(stderr, "CPU_GRAPH_PROFILE nodes=%d total_us=%" PRId64 "\n", graph->n_nodes, total);
+    for (int op = 0; op < GGML_OP_COUNT; ++op) {
+        if (wall[op]) fprintf(stderr, "CPU_GRAPH_OP op=%s wall_us=%" PRId64 " compute_us=%" PRId64 "\n", ggml_op_name(op), wall[op], compute[op]);
+    }
+    for (int i = 0; i < graph->n_nodes; ++i) {
+        if (ggml_node_profile_times[i] < 10000) continue;
+        const struct ggml_tensor * n = graph->nodes[i];
+        fprintf(stderr, "CPU_GRAPH_SLOW op=%s node=%s src0=%s ne=%" PRId64 "x%" PRId64 "x%" PRId64 "x%" PRId64 " src0ne=%" PRId64 "x%" PRId64 "x%" PRId64 "x%" PRId64 " wall_us=%" PRId64 " compute_us=%" PRId64 "\n",
+            ggml_op_name(n->op), n->name, n->src[0] ? n->src[0]->name : "-",
+            n->ne[0], n->ne[1], n->ne[2], n->ne[3],
+            n->src[0] ? n->src[0]->ne[0] : 0, n->src[0] ? n->src[0]->ne[1] : 0,
+            n->src[0] ? n->src[0]->ne[2] : 0, n->src[0] ? n->src[0]->ne[3] : 0,
+            ggml_node_profile_times[i], ggml_node_profile_compute[i]);
+    }
+    memset(ggml_node_profile_times, 0, graph->n_nodes*sizeof(int64_t));
+    memset(ggml_node_profile_compute, 0, graph->n_nodes*sizeof(int64_t));
+}
+
 static thread_ret_t ggml_graph_compute_thread(void * data) {
 #if defined(__SSE__)
     if (getenv("GGML_CPU_FTZ")) {
@@ -3246,6 +3297,7 @@ static thread_ret_t ggml_graph_compute_thread(void * data) {
 
     const struct ggml_cgraph * cgraph = tp->cgraph;
     const struct ggml_cplan  * cplan  = tp->cplan;
+    const bool node_profile = state->ith == 0 && ggml_node_profile_prepare(cgraph);
 
 #ifdef GGML_USE_CPU_RISCV64_SPACEMIT
     ggml_backend_cpu_riscv64_spacemit_set_numa_thread_affinity(state->ith);
@@ -3280,6 +3332,8 @@ static thread_ret_t ggml_graph_compute_thread(void * data) {
             continue;
         }
 
+        const int profile_index = node_n;
+        const int64_t profile_start = node_profile ? ggml_time_us() : 0;
         // TODO: move fused-op detection into ggml_graph_plan so fusion decisions are made once at planning time
         // Try fused ops, fall back to normal compute
         const int n_fused = ggml_cpu_try_fuse_ops(cgraph, node_n, &params, cplan);
@@ -3288,6 +3342,7 @@ static thread_ret_t ggml_graph_compute_thread(void * data) {
         } else {
             ggml_compute_forward(&params, node);
         }
+        if (node_profile) ggml_node_profile_compute[profile_index] += ggml_time_us() - profile_start;
 
         if (state->ith == 0 && cplan->abort_callback &&
                 cplan->abort_callback(cplan->abort_callback_data)) {
@@ -3298,7 +3353,9 @@ static thread_ret_t ggml_graph_compute_thread(void * data) {
         if (node_n + 1 < cgraph->n_nodes) {
             ggml_barrier(state->threadpool);
         }
+        if (node_profile) ggml_node_profile_times[profile_index] += ggml_time_us() - profile_start;
     }
+    if (node_profile) ggml_node_profile_report(cgraph);
 
 #ifdef GGML_USE_OPENMP
     GGML_PRINT_DEBUG("thread #%d compute-done cplan %p\n", state->ith, (const void *)cplan);
